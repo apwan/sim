@@ -22,7 +22,7 @@ TKINC=-isystem /usr/include
 # Modify these two lines to choose your compiler and compile time
 # flags.
 
-CC=gcc
+CC=g++
 CFLAGS=-Wall -O2
 
 ##################################################

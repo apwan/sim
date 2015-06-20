@@ -21,7 +21,6 @@ SOURCES += misc/examples.c \
            misc/isa.c \
            misc/node.c \
            misc/outgen.c \
-           misc/yas-grammar.c \
            misc/yas.c \
            misc/yis.c \
            pipe/ncopy.c \

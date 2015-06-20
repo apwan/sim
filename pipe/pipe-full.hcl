@@ -32,6 +32,9 @@ intsig IRRMOVL	'I_RRMOVL'
 intsig IIRMOVL	'I_IRMOVL'
 intsig IRMMOVL	'I_RMMOVL'
 intsig IMRMOVL	'I_MRMOVL'
+# for multicore sync
+intsig IRMSWAP  'I_RMSWAP'
+
 intsig IOPL	'I_ALU'
 intsig IJXX	'I_JMP'
 intsig ICALL	'I_CALL'
@@ -160,7 +163,7 @@ int f_ifun = [
 
 # Is instruction valid?
 bool instr_valid = f_icode in
-	{ INOP, IHALT, IRRMOVL, IIRMOVL, IRMMOVL, IMRMOVL,
+	{ INOP, IHALT, IRRMOVL, IIRMOVL, IRMMOVL, IMRMOVL, IRMSWAP,
 	  IOPL, IJXX, ICALL, IRET, IPUSHL, IPOPL, IIADDL, ILEAVE };
 
 # Determine status code for fetched instruction
@@ -174,11 +177,12 @@ int f_stat = [
 # Does fetched instruction require a regid byte?
 bool need_regids =
 	f_icode in { IRRMOVL, IOPL, IPUSHL, IPOPL,
-		     IIRMOVL, IRMMOVL, IMRMOVL, IIADDL };
+		     IIRMOVL, IRMMOVL, IMRMOVL, IIADDL, IRMSWAP };
 
 # Does fetched instruction require a constant word?
 bool need_valC =
-	f_icode in { IIRMOVL, IRMMOVL, IMRMOVL, IJXX, ICALL, IIADDL };
+	f_icode in { IIRMOVL, IRMMOVL, IMRMOVL, IRMSWAP, 
+	    IJXX, ICALL, IIADDL };
 
 # Predict next value of PC
 int f_predPC = [
@@ -191,7 +195,7 @@ int f_predPC = [
 
 ## What register should be used as the A source?
 int d_srcA = [
-	D_icode in { IRRMOVL, IRMMOVL, IOPL, IPUSHL  } : D_rA;
+	D_icode in { IRRMOVL, IRMMOVL, IOPL, IPUSHL, IRMSWAP  } : D_rA;
 	D_icode in { IPOPL, IRET } : RESP;
 	D_icode in { ILEAVE } : REBP;
 	1 : RNONE; # Don't need register
@@ -199,7 +203,7 @@ int d_srcA = [
 
 ## What register should be used as the B source?
 int d_srcB = [
-	D_icode in { IOPL, IRMMOVL, IMRMOVL, IIADDL  } : D_rB;
+	D_icode in { IOPL, IRMMOVL, IMRMOVL, IIADDL, IRMSWAP  } : D_rB;
 	D_icode in { IPUSHL, IPOPL, ICALL, IRET } : RESP;
 	D_icode in { ILEAVE } : REBP;
 	1 : RNONE;  # Don't need register
@@ -214,7 +218,7 @@ int d_dstE = [
 
 ## What register should be used as the M destination?
 int d_dstM = [
-	D_icode in { IMRMOVL, IPOPL } : D_rA;
+	D_icode in { IMRMOVL, IPOPL, IRMSWAP } : D_rA;
 	D_icode in { ILEAVE } : REBP;
 	1 : RNONE;  # Don't write any register
 ];
@@ -245,7 +249,7 @@ int d_valB = [
 ## Select input A to ALU
 int aluA = [
 	E_icode in { IRRMOVL, IOPL } : E_valA;
-	E_icode in { IIRMOVL, IRMMOVL, IMRMOVL, IIADDL } : E_valC;
+	E_icode in { IIRMOVL, IRMMOVL, IMRMOVL, IIADDL, IRMSWAP } : E_valC;
 	E_icode in { ICALL, IPUSHL } : -4;
 	E_icode in { IRET, IPOPL, ILEAVE } : 4;
 	# Other instructions don't need ALU
@@ -253,7 +257,7 @@ int aluA = [
 
 ## Select input B to ALU
 int aluB = [
-	E_icode in { IRMMOVL, IMRMOVL, IOPL, ICALL,
+	E_icode in { IRMMOVL, IMRMOVL, IOPL, ICALL, IRMSWAP,
 		     IPUSHL, IRET, IPOPL, IIADDL, ILEAVE } : E_valB;
 	E_icode in { IRRMOVL, IIRMOVL } : 0;
 	# Other instructions don't need ALU
@@ -283,16 +287,16 @@ int e_dstE = [
 
 ## Select memory address
 int mem_addr = [
-	M_icode in { IRMMOVL, IPUSHL, ICALL, IMRMOVL } : M_valE;
+	M_icode in { IRMMOVL, IPUSHL, ICALL, IMRMOVL, IRMSWAP } : M_valE;
 	M_icode in { IPOPL, IRET, ILEAVE } : M_valA;
 	# Other instructions don't need address
 ];
 
 ## Set read control signal
-bool mem_read = M_icode in { IMRMOVL, IPOPL, IRET, ILEAVE };
+bool mem_read = M_icode in { IMRMOVL, IPOPL, IRET, ILEAVE, IRMSWAP };
 
 ## Set write control signal
-bool mem_write = M_icode in { IRMMOVL, IPUSHL, ICALL };
+bool mem_write = M_icode in { IRMMOVL, IPUSHL, ICALL, IRMSWAP };
 
 #/* $begin pipe-m_stat-hcl */
 ## Update the status
@@ -327,6 +331,7 @@ int Stat = [
 bool F_bubble = 0;
 bool F_stall =
 	# Conditions for a load/use hazard
+	E_icode == IRMSWAP ||
 	E_icode in { IMRMOVL, IPOPL, ILEAVE } &&
 	 E_dstM in { d_srcA, d_srcB } ||
 	# Stalling at fetch while ret passes through pipeline
@@ -336,6 +341,7 @@ bool F_stall =
 # At most one of these can be true.
 bool D_stall =
 	# Conditions for a load/use hazard
+	E_icode == IRMSWAP ||
 	E_icode in { IMRMOVL, IPOPL, ILEAVE } &&
 	 E_dstM in { d_srcA, d_srcB };
 
@@ -344,7 +350,7 @@ bool D_bubble =
 	(E_icode == IJXX && !e_Cnd) ||
 	# Stalling at fetch while ret passes through pipeline
 	# but not condition for a load/use hazard
-	!(E_icode in { IMRMOVL, IPOPL, ILEAVE } && E_dstM in { d_srcA, d_srcB }) &&
+	!(E_icode == IRMSWAP || E_icode in { IMRMOVL, IPOPL, ILEAVE } && E_dstM in { d_srcA, d_srcB }) &&
 	  IRET in { D_icode, E_icode, M_icode };
 
 # Should I stall or inject a bubble into Pipeline Register E?
@@ -354,6 +360,7 @@ bool E_bubble =
 	# Mispredicted branch
 	(E_icode == IJXX && !e_Cnd) ||
 	# Conditions for a load/use hazard
+	E_icode == IRMSWAP ||
 	E_icode in { IMRMOVL, IPOPL, ILEAVE } &&
 	 E_dstM in { d_srcA, d_srcB};
 

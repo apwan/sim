@@ -4,7 +4,6 @@
 #define YYSTYPE node_ptr
 #include "hcl.tab.h"
 
-
 extern YYSTYPE yylval;
 extern int lineno;
 %}

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "node.h"
+
 #define YYSTYPE node_ptr
 
 /* Current line number.  Maintained by lex */
@@ -14,8 +15,19 @@ int errcnt = 0;
 
 FILE *outfile;
 
+#ifdef __cpluscplus
+extern "C" int yyparse(void);
+#else
 int yyparse(void);
+#endif
+
+#ifdef __cpluscplus
+extern "C" int yylex(void);
+#else
 int yylex(void);
+#endif
+
+
 
 void yyerror(const char *str)
 {
@@ -37,6 +49,8 @@ int yywrap()
 {
   return 1;
 }
+
+
   
 int main(int argc, char **argv)
 {

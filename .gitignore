@@ -1,5 +1,3 @@
-*.c
-*.h
 *.o
 *.yo
 *.ys
@@ -9,3 +7,9 @@ seq/ssim
 misc/yas
 misc/yis
 misc/hcl2c
+
+pipe/pipe-full.c
+
+misc/yas-grammar.c
+
+seq/seq-std.c

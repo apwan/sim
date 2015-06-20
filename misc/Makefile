@@ -1,4 +1,4 @@
-CC=gcc
+CC=g++
 CFLAGS=-Wall -O2
 LCFLAGS=-O2
 LEX = flex
@@ -38,7 +38,7 @@ yis: yis.o isa.o
 	$(CC) $(CFLAGS) yis.o isa.o -o yis
 
 hcl2c: hcl.tab.c lex.yy.c node.c outgen.c
-	$(CC) $(LCFLAGS) node.c lex.yy.c hcl.tab.c outgen.c -o hcl2c
+	gcc $(LCFLAGS) node.c lex.yy.c hcl.tab.c outgen.c -o hcl2c
 
 hcl2v: hcl.tab.c lex.yy.c node.c outgen.c
 	$(CC) $(LCFLAGS) -DVLOG node.c lex.yy.c hcl.tab.c outgen.c -o hcl2v
@@ -53,7 +53,5 @@ hcl.tab.c: hcl.y
 	$(YACC) -d hcl.y
 
 clean:
-	rm -f *.o *.yo *.exe yis yas hcl2c mux4 *~ core.* 
-	rm -f hcl.tab.c hcl.tab.h lex.yy.c
-
-
+	rm -f *.o *.yo *.exe yis yas hcl2c mux4 *~ core.*
+	rm -f hcl.tab.c hcl.tab.h lex.yy.c yas-grammar.c
