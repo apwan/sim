@@ -10,8 +10,6 @@
 
 
 
-#define DEBUG(m) //printf(m)
-#define DEBUGP(m,n) //printf(m,n)
 
 #ifdef __cplusplus
 #define CPPBEGIN extern "C" {
@@ -21,6 +19,8 @@
 #define CPPEND
 #endif
 
+
+extern int gui_mode;
 
 /**************** Registers *************************/
 
@@ -101,44 +101,13 @@ typedef unsigned char byte_t;
 typedef int word_t;
 
 /* number of address bits */
-#define CACHE_m 16
-
-#define CACHE_b 4
-#define CACHE_B (1<<CACHE_b)
-#define CACHE_s 6
-#define CACHE_S (1<<CACHE_s)
-#define CACHE_E 16
-
-#define CACHE_TAG_MASK 0x3F
-#define CACHE_MASK(s) (~((-1)<<(s)))
-#define MASK(s,t) ((-1<<(t))^(-1<<(s)))
-
-
-
-
-
-
-typedef struct {
-    byte_t valid:1;
-    byte_t dirty:1;
-    byte_t tag:6;
-    byte_t block[CACHE_B];
-} cache_line;
-
-
-typedef struct{
-    int cac_s;
-    int cac_E;
-    int len; /* number of cache_line */
-    cache_line *contents;
-} cache_rec, *cache_t;
-
 
 CPPBEGIN
 
 class MemRec {
 public:
     MemRec(int l);
+    MemRec(const MemRec&);
     ~MemRec();
 
     int getLen();
@@ -148,22 +117,22 @@ public:
     bool_t setWord(word_t pos, word_t val);
     void dump(FILE *outfile, word_t pos, int l);
     bool_t clear();
+    int load(FILE *infile, int report_error);
 
     MemRec &operator=(const MemRec &);
     bool_t operator!=(const MemRec &);
-private:
+
+    /* Print the differences between two memories */
+    friend bool_t diff_mem(MemRec* oldm, MemRec* newm, FILE *outfile);
+    /* Print the differences between two regs */
+    friend bool_t diff_reg(MemRec* oldr, MemRec* newr, FILE *outfile);
+protected:
     int len;
-    word_t maxaddr;
+    //word_t maxaddr;
     byte_t *contents;
 };
 
 /* Represent a memory as an array of bytes */
-typedef struct {
-  int len;
-  word_t maxaddr;
-  MemRec *m;
-  cache_t c;
-} mem_rec, *mem_t;
 
 CPPEND
 
@@ -180,17 +149,8 @@ typedef struct{
 
 CPPBEGIN
 
-/* Create a memory with len bytes */
-mem_t init_mem(int len);
-void free_mem(mem_t m);
 
-/* Set contents of memory to 0 */
-void clear_mem(mem_t m);
 
-/* Make a copy of a memory */
-mem_t copy_mem(mem_t oldm);
-/* Print the differences between two memories */
-bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile);
 
 /* How big should the memory be? */
 #ifdef BIG_MEM
@@ -199,27 +159,69 @@ bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile);
 #define MEM_SIZE (1<<13)
 #endif
 
-/*** In the following functions, a return value of 1 means success ***/
+#define get_byte_val(MEM,pos,dest) (MEM)->getByte(pos,dest)
+#define get_word_val(MEM,pos,dest) (MEM)->getWord(pos,dest)
+#define set_byte_val(MEM,pos,val) (MEM)->setByte(pos,val)
+#define set_word_val(MEM,pos,val) (MEM)->setWord(pos,val)
+#define dump_memory(outfile, MEM, pos, len) (MEM)->dump(outfile,pos,len)
+#define clear_mem(MEM) (MEM)->clear()
+#define copy_mem(MEM) new MemRec(*MEM)
+#define init_mem(len) new MemRec(len)
+#define free_mem(MEM) delete MEM
 
-/* Load memory from .yo file.  Return number of bytes read */
-int load_mem(mem_t m, FILE *infile, int report_error);
+#define load_mem(MEM,infile,err) (MEM)->load(infile,err)
 
-/* Get byte from memory */
-bool_t get_byte_val(mem_t m, word_t pos, byte_t *dest);
+#define init_reg() new RegRec()
+#define free_reg(REG) delete (REG)
+#define copy_reg(REG) new RegRec(*((RegRec*)REG))
+#define get_reg_val(REG,id) ((RegRec*)REG)->getVal(id)
+#define set_reg_val(REG,id,val) ((RegRec*)REG)->setVal(id,val)
+#define dump_reg(outfile, REG) (REG)->dump(outfile)
 
-/* Get 4 bytes from memory */
-bool_t get_word_val(mem_t m, word_t pos, word_t *dest);
-
-/* Set byte in memory */
-bool_t set_byte_val(mem_t m, word_t pos, byte_t val);
-
-/* Set 4 bytes in memory */
-bool_t set_word_val(mem_t m, word_t pos, word_t val);
-
-/* Print contents of memory */
-void dump_memory(FILE *outfile, mem_t m, word_t pos, int cnt);
+typedef MemRec* mem_t;
 
 
+/* Cache */
+
+#define CACHE_m 16
+
+#define CACHE_b 4
+#define CACHE_B (1<<CACHE_b)
+#define CACHE_s 6
+#define CACHE_S (1<<CACHE_s)
+#define CACHE_E 16
+
+#define CACHE_TAG_MASK 0x3F
+#define CACHE_MASK(s) (~((-1)<<(s)))
+#define MASK(s,t) ((-1<<(t))^(-1<<(s)))
+
+
+typedef struct {
+    byte_t valid:1;
+    byte_t dirty:1;
+    byte_t tag:6;
+    byte_t block[CACHE_B];
+} cache_line;
+
+typedef struct{
+    int cac_s;
+    int cac_E;
+    int len; /* number of cache_line */
+    cache_line *contents;
+} cache_rec, *cache_t;
+
+
+
+
+class Cache {
+public:
+    Cache();
+    ~Cache();
+    void clear();
+
+    word_t find(word_t pos);
+
+};
 
 
 
@@ -244,18 +246,45 @@ void dump_cache(FILE *outfile, cache_t c, word_t s, int len);
 
 /********** Implementation of Register File *************/
 
-mem_t init_reg();
-void free_reg(mem_t r);
 
-/* Make a copy of a register file */
-mem_t copy_reg(mem_t oldr);
 /* Print the differences between two register files */
-bool_t diff_reg(mem_t oldr, mem_t newr, FILE *outfile);
 
 
-word_t get_reg_val(mem_t r, int id);
-void set_reg_val(mem_t r, int id, word_t val);
-void dump_reg(FILE *outfile, mem_t r);
+class RegRec: public MemRec{
+public:
+    RegRec(): MemRec(32){}
+    RegRec(const RegRec& r):MemRec(r){}
+
+    word_t getVal(int id);
+    void setVal(int id, word_t val);
+    void dump(FILE *outfile);
+
+};
+
+int reg_valid(int id);
+const struct {
+    char *name;
+    int id;// int -> reg_id_t
+} reg_table[REG_ERR+1] =
+{
+    {"%eax",   REG_EAX},
+    {"%ecx",   REG_ECX},
+    {"%edx",   REG_EDX},
+    {"%ebx",   REG_EBX},
+    {"%esp",   REG_ESP},
+    {"%ebp",   REG_EBP},
+    {"%esi",   REG_ESI},
+    {"%edi",   REG_EDI},
+    {"----",  REG_ERR},
+    {"----",  REG_ERR},
+    {"----",  REG_ERR},
+    {"----",  REG_ERR},
+    {"----",  REG_ERR},
+    {"----",  REG_ERR},
+    {"----",  REG_ERR},
+    {"----",  REG_NONE},
+    {"----",  REG_ERR}
+};
 
 
 CPPEND
@@ -263,6 +292,22 @@ CPPEND
 /* ****************  ALU Function **********************/
 
 /* Compute ALU operation */
+
+const struct {
+    char symbol;
+    int id;
+} alu_table[A_NONE+1] =
+{
+    {'+',   A_ADD},
+    {'-',   A_SUB},
+    {'&',   A_AND},
+    {'^',   A_XOR},
+    {'?',   A_NONE}
+};
+
+#define hex2dig(c) (int)(isdigit((int)c)? (c - '0'): isupper((int)c)? (c - 'A' + 10): (c - 'a' + 10))
+
+
 word_t compute_alu(alu_t op, word_t arg1, word_t arg2);
 
 typedef unsigned char cc_t;
@@ -291,26 +336,33 @@ char *stat_name(stat_t e);
 
 /* **************** ISA level implementation *********/
 
-typedef struct {
+#define new_state(len) new StateRec(len)
+#define copy_state(ST) new StateRec(*ST)
+#define free_state(ST) delete (ST)
+
+struct StateRec{
+
+  StateRec(int memlen);
+  StateRec(const StateRec&);
+  ~StateRec();
+  StateRec &operator=(const StateRec&);
+  stat_t step(FILE *);
+
   word_t pc;
   mem_t r;
   mem_t m;
   cc_t cc;
-} state_rec, *state_ptr;
+};
 
-state_ptr new_state(int memlen);
-void free_state(state_ptr s);
+typedef StateRec state_rec;
+typedef StateRec* state_ptr;
 
-state_ptr copy_state(state_ptr s);
 bool_t diff_state(state_ptr olds, state_ptr news, FILE *outfile);
 
 /* Determine if condition satisified */
 bool_t cond_holds(cc_t cc, cond_t bcond);
 
 /* Execute single instruction.  Return status. */
-
-
-
 stat_t step_state(state_ptr s, FILE *error_file);
 
 

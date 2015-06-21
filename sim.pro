@@ -35,3 +35,6 @@ SOURCES += misc/examples.c \
     pipe/utils.c \
     pipe/simulator.c \
     misc/mem.c
+
+DISTFILES += \
+    pipe/pipe.tcl

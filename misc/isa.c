@@ -11,29 +11,6 @@ extern int gui_mode;
 /* Bytes Per Line = Block size of memory */
 
 
-struct {
-    char *name;
-    int id;// int -> reg_id_t
-} reg_table[REG_ERR+1] = 
-{
-    {"%eax",   REG_EAX},
-    {"%ecx",   REG_ECX},
-    {"%edx",   REG_EDX},
-    {"%ebx",   REG_EBX},
-    {"%esp",   REG_ESP},
-    {"%ebp",   REG_EBP},
-    {"%esi",   REG_ESI},
-    {"%edi",   REG_EDI},
-    {"----",  REG_ERR},
-    {"----",  REG_ERR},
-    {"----",  REG_ERR},
-    {"----",  REG_ERR},
-    {"----",  REG_ERR},
-    {"----",  REG_ERR},
-    {"----",  REG_ERR},
-    {"----",  REG_NONE},
-    {"----",  REG_ERR}
-};
 
 
 reg_id_t find_register(char *name)
@@ -48,9 +25,9 @@ reg_id_t find_register(char *name)
 char *reg_name(int id)
 {
     if (id >= 0 && id < REG_NONE)
-	return reg_table[id].name;
+        return reg_table[id].name;
     else
-	return reg_table[REG_NONE].name;
+        return reg_table[REG_NONE].name;
 }
 
 /* Is the given register ID a valid program register? */
@@ -133,81 +110,20 @@ instr_ptr bad_instr()
     return &invalid_instr;
 }
 
-/* TODO: add shared memory */
-mem_t init_mem(int len)
-{
-
-    mem_t result = (mem_t) malloc(sizeof(mem_rec));
-    result->m = new MemRec(len);
-    return result;
-
-    len = ((len+BPL-1)/BPL)*BPL;
-    result->len = len;
-    //result->contents = (byte_t *) calloc(len, 1);
-
-
-    if(len>64){
-        //result->c = init_cache(CACHE_s, CACHE_E);
-        result->c = NULL;
-    }else{
-        result->c = NULL;
-    }
-
-
-    return result;
-}
-
-
-
-void clear_mem(mem_t m)
-{
-
-    m->m->clear();
-    return;
-    if(m->c){
-        clear_cache(m->c, NULL);
-    }
-
-
-    //memset(m->contents, 0, m->len);
-}
-
-void free_mem(mem_t m)
-{
-    if(m->c)
-        free_cache(m->c);
-
-    delete m->m;
-
-    //free((void *) m->contents);
-    free((void *) m);
-}
-
-
-
-
-mem_t copy_mem(mem_t oldm)
-{
-    mem_t newm = init_mem(oldm->len);
-    *newm->m = *oldm->m;
-
-    //memcpy(newm->contents, oldm->contents, oldm->len);
-    return newm;
-}
 
 
 
 bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile)
 {
     word_t pos;
-    int len = oldm->m->getLen();
+    int len = oldm->len;
     bool_t diff = FALSE;
-    if (newm->m->getLen() < len)
-    len = newm->m->getLen();
+    if (newm->len < len)
+    len = newm->len;
     for (pos = 0; (!diff || outfile) && pos+4 <= len; pos += 4) {
         word_t ov = 0;  word_t nv = 0;
-	get_word_val(oldm, pos, &ov);
-	get_word_val(newm, pos, &nv);
+        oldm->getWord(pos, &ov);
+        newm->getWord(pos, &nv);
 	if (nv != ov) {
 	    diff = TRUE;
 	    if (outfile)
@@ -218,409 +134,11 @@ bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile)
     return diff;
 }
 
-int hex2dig(char c)
-{
-    if (isdigit((int)c))
-	return c - '0';
-    if (isupper((int)c))
-	return c - 'A' + 10;
-    else
-	return c - 'a' + 10;
-}
-
-#define LINELEN 4096
-int load_mem(mem_t m, FILE *infile, int report_error)
-{
-    /* Read contents of .yo file */
-    char buf[LINELEN];
-    char c, ch, cl;
-    int byte_cnt = 0;
-    int lineno = 0;
-    word_t bytepos = 0;
-    int empty_line = 1;
-    int addr = 0;
-    char hexcode[15];
-
-
-
-#ifdef HAS_GUI
-    /* For display */
-    int line_no = 0;
-    char line[LINELEN];
-#endif /* HAS_GUI */   
-
-    int index = 0;
-    while (fgets(buf, LINELEN, infile)) {
-        int cpos = 0;
-        empty_line = 1;
-        lineno++;
-        /* Skip white space */
-        while (isspace((int)buf[cpos]))
-            cpos++;
-
-        if (buf[cpos] != '0' ||
-                (buf[cpos+1] != 'x' && buf[cpos+1] != 'X'))
-            continue; /* Skip this line */
-        cpos+=2;
-
-        /* Get address */
-        bytepos = 0;
-        while (isxdigit((int)(c=buf[cpos]))) {
-            cpos++;
-            bytepos = bytepos*16 + hex2dig(c);
-        }
-
-        while (isspace((int)buf[cpos]))
-            cpos++;
-
-        if (buf[cpos++] != ':') {
-            if (report_error) {
-                fprintf(stderr, "Error reading file. Expected colon\n");
-                fprintf(stderr, "Line %d:%s\n", lineno, buf);
-                fprintf(stderr,
-                        "Reading '%c' at position %d\n", buf[cpos], cpos);
-            }
-            return 0;
-	}
-
-	addr = bytepos;
-
-	while (isspace((int)buf[cpos]))
-	    cpos++;
-
-	index = 0;
-
-	/* Get code */
-	while (isxdigit((int)(ch=buf[cpos++])) && 
-	       isxdigit((int)(cl=buf[cpos++]))) {
-	    byte_t byte = 0;
-	    if (bytepos >= m->len) {
-            if (report_error) {
-                fprintf(stderr,
-                    "Error reading file. Invalid address. 0x%x\n",
-                    bytepos);
-                fprintf(stderr, "Line %d:%s\n", lineno, buf);
-            }
-            return 0;
-	    }
-	    byte = hex2dig(ch)*16+hex2dig(cl);
-	    m->contents[bytepos++] = byte;
-	    byte_cnt++;
-	    empty_line = 0;
-	    hexcode[index++] = ch;
-	    hexcode[index++] = cl;
-	}
-	/* Fill rest of hexcode with blanks */
-	for (; index < 12; index++)
-	    hexcode[index] = ' ';
-	hexcode[index] = '\0';
-
-#ifdef HAS_GUI
-	if (gui_mode) {
-	    /* Now get the rest of the line */
-	    while (isspace((int)buf[cpos]))
-		cpos++;
-	    cpos++; /* Skip over '|' */
-	    
-	    index = 0;
-	    while ((c = buf[cpos++]) != '\0' && c != '\n') {
-		line[index++] = c;
-	    }
-	    line[index] = '\0';
-        if (!empty_line){
-            report_line(line_no++, addr, hexcode, line);
-        }
-	}
-#endif /* HAS_GUI */ 
-    }
-    return byte_cnt;
-}
-
-#define DEBUG_MEM DEBUG("mem "); DEBUGP("%x: ", pos);DEBUGP("%d;\n", *dest);
-#define DEBUG_CACHE DEBUG("cache ");DEBUGP("%x: ",pos);DEBUGP("%d\n",*dest);
-
-bool_t get_byte_val(mem_t m, word_t pos, byte_t *dest)
-{
-    return m->m->getByte(pos, dest);
-
-
-    bool_t ret;
-    if(m->c){
-        ret = get_cache_byte(m->c, pos, dest, m);
-    }
-    if (pos < 0 || pos >= m->len)
-        return FALSE;
-    DEBUG_CACHE
-    *dest = m->contents[pos];
-    DEBUG_MEM
-
-    return TRUE;
-}
-
-bool_t get_word_val(mem_t m, word_t pos, word_t *dest)
-{
-    return m->m->getWord(pos, dest);
-    bool_t ret;
-    if(m->c){
-        ret = get_cache_word(m->c, pos, dest, m);
-    }
-
-    if (pos < 0 || pos + 4 > m->len)
-        return FALSE;
-    DEBUG_CACHE
-    memcpy(dest, m->contents+pos, 4);
-    DEBUG_MEM
-
-/*
-    for (i = 0; i < 4; i++)
-	val = val | m->contents[pos+i]<<(8*i);
-*/
-    return TRUE;
-}
-#undef DEBUG_CACHE
-#undef DEBUG_MEM
-
-cache_t init_cache(int s, int E){
-    cache_t res = (cache_t) malloc(sizeof(cache_rec));
-    res->cac_s = s;
-    res->cac_E = E;
-    res->len = E<<s;
-    res->contents = (cache_line*) calloc(res->len, sizeof(cache_line));
-    return res;
-}
-
-void clear_cache(cache_t c, mem_t m){
-    int i;
-    if(m){
-        for(i=0;i<c->len;++i){
-            evict_cache(c, i, m);
-        }
-    }
-    memset(c->contents, 0, c->len*sizeof(cache_line));
-}
-
-void free_cache(cache_t c){
-    free((void*)c->contents);
-    free((void*)c);
-}
 
 
 
 
-bool_t evict_cache(cache_t c, word_t i, mem_t m){
-    /* write back */
-    if(i<0 || i>c->len) return FALSE;
-    if(!c->contents[i].dirty || !c->contents[i].valid) return TRUE;
 
-    word_t pos = (((c->contents[i].tag<<c->cac_s) | (i/c->cac_E))) << CACHE_b;
-    memcpy(m->contents+pos, c->contents[i].block, 1<<CACHE_b);
-    c->contents[i].dirty = FALSE;
-    //c->contents[i].valid = FALSE;
-    return TRUE;
-}
-
-bool_t retr_cache(cache_t c, byte_t tag, word_t i, mem_t m){
-    if(i<0 || i>c->len) return FALSE;
-    c->contents->tag = tag;
-    word_t pos = ((tag<<c->cac_s) | (i/c->cac_E))<<CACHE_b;
-    memcpy(c->contents[i].block, m->contents+pos, CACHE_B);
-    c->contents[i].valid = TRUE;
-    c->contents[i].dirty = FALSE;
-    return TRUE;
-}
-
-
-word_t search_cache(cache_t c, word_t pos, mem_t m){
-
-    word_t s = MASK(c->cac_s,0) & (pos >> CACHE_b);
-    byte_t t = CACHE_TAG_MASK & (pos>>(CACHE_b+c->cac_s));
-    word_t i = s * c->cac_E;
-    word_t e = i + c->cac_E;
-    for(; i<e;++i){
-        if(c->contents[i].valid && t == c->contents[i].tag)
-            return i;
-    }
-    if(m == NULL)
-        return -1;
-    printf("\n%d, Cache Miss\n", pos);
-
-    for (i=s*c->cac_E;i<e;++i){
-        if(c->contents[i].valid)
-            continue;
-        else
-            break;
-    }
-    if(i>=e){
-        i = s+rand()%c->cac_E;
-        evict_cache(c, i, m);
-    }
-    retr_cache(c, t, i, m);
-    dump_cache(stdout, c, i, 1);
-    return i;
-}
-
-
-
-bool_t get_cache_byte(cache_t c, word_t pos, byte_t *dest, mem_t m){
-    if (pos < 0 || pos >= m->len)
-        return FALSE;
-    int i = search_cache(c, pos, m);
-    word_t p = pos & CACHE_MASK(CACHE_b);
-    *dest = c->contents[i].block[p];
-
-    return TRUE;
-}
-
-bool_t get_cache_word(cache_t c, word_t pos, word_t *dest, mem_t m){
-    if (pos < 0 || pos+4 > m->len)
-        return FALSE;
-    word_t i = search_cache(c, pos, m);
-    word_t p = pos & MASK(CACHE_b,0);
-    word_t d = CACHE_B - p;
-
-    if(d>=4){
-        memcpy(dest, c->contents[i].block+p, 4);
-    }else{
-        printf("word exceeds\n");
-        memcpy(dest, c->contents[i].block+p, d);
-        word_t i = search_cache(c, pos+d, m);
-        memcpy((byte_t*)dest+d, c->contents[i].block, 4-d);
-    }
-    return TRUE;
-}
-
-word_t set_cache_byte(cache_t c, word_t pos, byte_t val, mem_t m){
-    if (pos < 0 || pos >= m->len)
-        return -1;
-    word_t i = search_cache(c, pos, m);
-    c->contents[i].block[pos&MASK(CACHE_b,0)] = val;
-    c->contents[i].dirty = TRUE;
-    return i;
-}
-
-word_t set_cache_word(cache_t c, word_t pos, word_t val, mem_t m){
-    if (pos < 0 || pos >= m->len)
-        return -1;
-    word_t i = search_cache(c, pos, m);
-    word_t p = pos&CACHE_MASK(CACHE_b);
-    word_t d = CACHE_B - p;
-
-    if(d>=4){
-        memcpy(c->contents[i].block+p, &val, 4);
-        c->contents[i].dirty = TRUE;
-    }else{
-        printf("word exceeds\n");
-        memcpy(c->contents[i].block+p, &val, d);
-        c->contents[i].dirty = TRUE;
-        word_t i = search_cache(c, pos+d, m);
-        memcpy(c->contents[i].block, (byte_t*)&val + d, 4-d);
-        c->contents[i].dirty = TRUE;
-    }
-    return i;
-}
-
-void dump_cache(FILE *outfile, cache_t c, word_t s, int len)
-{
-    int i, j;
-    word_t e = s+len;
-    if (e > c->len)
-        e = c->len;
-
-    for (i = s; i < e; ++i) {
-        word_t val = 0;
-        fprintf(outfile, "\n0x%.4x:", i);
-        fprintf(outfile, "valid:%.2x,dirty:%.2x\n", c->contents[i].valid, c->contents[i].dirty);
-        for (j = 0; j < CACHE_B; j+= 4) {
-            memcpy(&val, c->contents[i].block+j, 4);
-            fprintf(outfile, " %.8x", val);
-        }
-        fprintf(outfile, "\n");
-    }
-}
-
-
-bool_t set_byte_val(mem_t m, word_t pos, byte_t val)
-{
-    return m->m->setByte(pos, val);
-
-    word_t ret;
-    if(m->c){
-        ret = set_cache_byte(m->c, pos, val, m);
-        evict_cache(m->c, ret, m);
-    }
-    if (pos < 0 || pos >= m->len)
-	return FALSE;
-    m->contents[pos] = val;
-    return TRUE;
-}
-
-bool_t set_word_val(mem_t m, word_t pos, word_t val)
-{
-    return m->m->setWord(pos, val);
-    word_t ret;
-    if(m->c){
-        ret = set_cache_word(m->c, pos, val, m);
-        evict_cache(m->c, ret, m);
-    }
-    if (pos < 0 || pos + 4 > m->len)
-        return FALSE;
-    memcpy(m->contents+pos, &val, 4);
-    /*
-    int i;
-    for (i = 0; i < 4; i++) {
-	m->contents[pos+i] = val & 0xFF;
-	val >>= 8;
-    }
-    */
-    return TRUE;
-}
-
-void dump_memory(FILE *outfile, mem_t m, word_t pos, int len)
-{
-    m->m->dump(outfile, pos, len);
-    return;
-
-    int i, j;
-    while (pos % BPL) {
-        pos --;
-        len ++;
-    }
-
-    len = ((len+BPL-1)/BPL)*BPL;
-
-    if (pos+len > m->len)
-        len = m->len-pos;
-
-    for (i = 0; i < len; i+=BPL) {
-        word_t val = 0;
-        fprintf(outfile, "0x%.4x:", pos+i);
-        for (j = 0; j < BPL; j+= 4) {
-            get_word_val(m, pos+i+j, &val);
-            fprintf(outfile, " %.8x", val);
-        }
-    }
-}
-
-
-
-mem_t init_reg()
-{
-    mem_t res = init_mem(32);
-    //res->c = init_cache(0, 2, res);
-    return res;
-}
-
-void free_reg(mem_t r)
-{
-
-    free_mem(r);
-}
-/* only for saving and comparing */
-mem_t copy_reg(mem_t oldr)
-{
-    mem_t res = copy_mem(oldr);
-    return res;
-}
 
 bool_t diff_reg(mem_t oldr, mem_t newr, FILE *outfile)
 {
@@ -628,12 +146,12 @@ bool_t diff_reg(mem_t oldr, mem_t newr, FILE *outfile)
     int len = oldr->len;
     bool_t diff = FALSE;
     if (newr->len < len)
-	len = newr->len;
+    len = newr->len;
     for (pos = 0; (!diff || outfile) && pos < len; pos += 4) {
         word_t ov = 0;
         word_t nv = 0;
-	get_word_val(oldr, pos, &ov);
-	get_word_val(newr, pos, &nv);
+    oldr->getWord(pos, &ov);
+    newr->getWord(pos, &nv);
 	if (nv != ov) {
 	    diff = TRUE;
 	    if (outfile)
@@ -644,61 +162,14 @@ bool_t diff_reg(mem_t oldr, mem_t newr, FILE *outfile)
     return diff;
 }
 
-word_t get_reg_val(mem_t r, int id)
-{
-    word_t val = 0;
-    if (id >= REG_NONE)
-        return 0;
-    get_word_val(r,id*4, &val);
-    return val;
-}
 
-void set_reg_val(mem_t r, int id, word_t val)
-{
-    if (id < REG_NONE) {
-        set_word_val(r,id*4,val);
-
-#ifdef HAS_GUI
-	if (gui_mode) {
-        printf("about to sent signal");
-	    signal_register_update(id, val);
-	}
-#endif /* HAS_GUI */
-    }
-}
-     
-void dump_reg(FILE *outfile, mem_t r) {
-    int id;
-    for (id = 0; reg_valid(id); id++) {
-        fprintf(outfile, "   %s  ", reg_table[id].name);
-    }
-    fprintf(outfile, "\n");
-    for (id = 0; reg_valid(id); id++) {
-        word_t val = 0;
-        get_word_val(r, id*4, &val);
-        fprintf(outfile, " %x", val);
-    }
-    fprintf(outfile, "\n");
-}
-
-struct {
-    char symbol;
-    int id;
-} alu_table[A_NONE+1] = 
-{
-    {'+',   A_ADD},
-    {'-',   A_SUB},
-    {'&',   A_AND},
-    {'^',   A_XOR},
-    {'?',   A_NONE}
-};
 
 char op_name(alu_t op)
 {
     if (op < A_NONE)
-	return alu_table[op].symbol;
+        return alu_table[op].symbol;
     else
-	return alu_table[A_NONE].symbol;
+        return alu_table[A_NONE].symbol;
 }
 
 word_t compute_alu(alu_t op, word_t argA, word_t argB)
@@ -706,19 +177,19 @@ word_t compute_alu(alu_t op, word_t argA, word_t argB)
     word_t val;
     switch(op) {
     case A_ADD:
-	val = argA+argB;
-	break;
+        val = argA+argB;
+        break;
     case A_SUB:
-	val = argB-argA;
-	break;
+        val = argB-argA;
+        break;
     case A_AND:
-	val = argA&argB;
-	break;
+        val = argA&argB;
+        break;
     case A_XOR:
-	val = argA^argB;
-	break;
+        val = argA^argB;
+        break;
     default:
-	val = 0;
+        val = 0;
     }
     return val;
 }
@@ -763,9 +234,9 @@ char *cc_name(cc_t c)
 {
     int ci = c;
     if (ci < 0 || ci > 7)
-	return "???????????";
+        return "???????????";
     else
-	return cc_names[c];
+        return cc_names[c];
 }
 
 /* Status types */
@@ -779,33 +250,13 @@ char *stat_name(stat_t e)
     return stat_names[e];
 }
 
+
+
+
+
 /**************** Implementation of ISA model ************************/
 
-state_ptr new_state(int memlen)
-{
-    state_ptr result = (state_ptr) malloc(sizeof(state_rec));
-    result->pc = 0;
-    result->r = init_reg();
-    result->m = init_mem(memlen);
-    result->cc = DEFAULT_CC;
-    return result;
-}
 
-void free_state(state_ptr s)
-{
-    free_reg(s->r);
-    free_mem(s->m);
-    free((void *) s);
-}
-
-state_ptr copy_state(state_ptr s) {
-    state_ptr result = (state_ptr) malloc(sizeof(state_rec));
-    result->pc = s->pc;
-    result->r = copy_reg(s->r);
-    result->m = copy_mem(s->m);
-    result->cc = s->cc;
-    return result;
-}
 
 bool_t diff_state(state_ptr olds, state_ptr news, FILE *outfile) {
     bool_t diff = FALSE;
@@ -840,33 +291,58 @@ bool_t cond_holds(cc_t cc, cond_t bcond) {
     
     switch(bcond) {
     case C_YES:
-	jump = TRUE;
-	break;
+        jump = TRUE;
+        break;
     case C_LE:
-	jump = (sf^of)|zf;
-	break;
+        jump = (sf^of)|zf;
+        break;
     case C_L:
-	jump = sf^of;
-	break;
+        jump = sf^of;
+        break;
     case C_E:
-	jump = zf;
-	break;
+        jump = zf;
+        break;
     case C_NE:
-	jump = zf^1;
-	break;
+        jump = zf^1;
+        break;
     case C_GE:
-	jump = sf^of^1;
-	break;
+        jump = sf^of^1;
+        break;
     case C_G:
-	jump = (sf^of^1)&(zf^1);
-	break;
+        jump = (sf^of^1)&(zf^1);
+        break;
     default:
-	jump = FALSE;
-	break;
+        jump = FALSE;
+        break;
     }
     return jump;
 }
 
+
+
+StateRec::StateRec(int memlen):pc(0),r(init_reg()),
+    m(init_mem(memlen)),cc(DEFAULT_CC){
+}
+
+StateRec::StateRec(const StateRec& s):pc(s.pc),r(copy_reg(s.r)),
+    m(copy_mem(s.m)), cc(s.cc){
+}
+
+StateRec::~StateRec(){
+    delete r;
+    delete m;
+}
+
+StateRec &StateRec::operator=(const StateRec& s){
+    pc = s.pc;
+    *r = *(s.r);
+    *m = *(s.m);
+    cc = s.cc;
+}
+
+stat_t StateRec::step(FILE *errFile){
+    return step_state(this, errFile);
+}
 
 /* Execute single instruction.  Return status. */
 
