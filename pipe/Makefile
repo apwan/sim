@@ -23,7 +23,7 @@ TKINC=-isystem /usr/include
 # flags.
 
 CC=g++
-CFLAGS=-Wall -O2
+CFLAGS=-Wall -O2 -DBIG_MEM
 
 ##################################################
 # You shouldn't need to modify anything below here
@@ -34,15 +34,17 @@ HCL2C=$(MISCDIR)/hcl2c
 INC=$(TKINC) -I$(MISCDIR) $(GUIMODE)
 LIBS=$(TKLIBS) -lm
 YAS = ../misc/yas
+SOURCES = psim.c psim_main.c utils.c simulator.c psim_gui.c#
+HEADERS = utils.h sim.h simulator.h psim_gui.hpp#
 
 all: psim drivers
 
 # This rule builds the PIPE simulator
-psim: psim.c sim.h pipe-$(VERSION).hcl $(MISCDIR)/isa.c $(MISCDIR)/isa.h
+psim: psim.c $(HEADERS) pipe-$(VERSION).hcl $(MISCDIR)/isa.c $(MISCDIR)/isa.h
 	# Building the pipe-$(VERSION).hcl version of PIPE
 	$(HCL2C) -n pipe-$(VERSION).hcl < pipe-$(VERSION).hcl > pipe-$(VERSION).c
-	$(CC) $(CFLAGS) $(INC) -o psim psim.c pipe-$(VERSION).c \
-		$(MISCDIR)/isa.c $(LIBS)
+	$(CC) $(CFLAGS) $(INC) -o psim $(SOURCES) pipe-$(VERSION).c \
+		$(MISCDIR)/isa.c $(MISCDIR)/mem.c $(LIBS)
 
 # This rule builds driver programs for Part C of the Architecture Lab
 drivers:

@@ -1,10 +1,11 @@
 CC=g++
-CFLAGS=-Wall -O2
+CFLAGS=-Wall -O2 -DBIG_MEM
 LCFLAGS=-O2
 LEX = flex
 YACC=bison
 LEXLIB = -L /opt/local/lib -lfl
 YAS=./yas
+objects = isa.o mem.o
 
 all: yis yas hcl2c
 
@@ -25,17 +26,20 @@ yas-grammar.c: yas-grammar.lex
 isa.o: isa.c isa.h
 	$(CC) $(CFLAGS) -c isa.c
 
+mem.o: mem.c isa.h
+	$(CC) $(CFLAGS) -c mem.c	
+
 yas.o: yas.c yas.h isa.h
 	$(CC) $(CFLAGS) -c yas.c
 
-yas: yas.o yas-grammar.o isa.o
-	$(CC) $(CFLAGS) yas-grammar.o yas.o isa.o ${LEXLIB} -o yas
+yas: yas.o yas-grammar.o $(objects)
+	$(CC) $(CFLAGS) yas-grammar.o yas.o $(objects) ${LEXLIB} -o yas
 
 yis.o: yis.c isa.h
 	$(CC) $(CFLAGS) -c yis.c
 
-yis: yis.o isa.o
-	$(CC) $(CFLAGS) yis.o isa.o -o yis
+yis: yis.o $(objects)
+	$(CC) $(CFLAGS) yis.o $(objects) -o yis
 
 hcl2c: hcl.tab.c lex.yy.c node.c outgen.c
 	gcc $(LCFLAGS) node.c lex.yy.c hcl.tab.c outgen.c -o hcl2c

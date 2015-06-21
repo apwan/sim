@@ -9,7 +9,7 @@
 extern int gui_mode;
 
 /* Bytes Per Line = Block size of memory */
-#define BPL 32
+
 
 struct {
     char *name;
@@ -138,9 +138,14 @@ mem_t init_mem(int len)
 {
 
     mem_t result = (mem_t) malloc(sizeof(mem_rec));
+    result->m = new MemRec(len);
+    return result;
+
     len = ((len+BPL-1)/BPL)*BPL;
     result->len = len;
-    result->contents = (byte_t *) calloc(len, 1);
+    //result->contents = (byte_t *) calloc(len, 1);
+
+
     if(len>64){
         //result->c = init_cache(CACHE_s, CACHE_E);
         result->c = NULL;
@@ -156,17 +161,25 @@ mem_t init_mem(int len)
 
 void clear_mem(mem_t m)
 {
+
+    m->m->clear();
+    return;
     if(m->c){
         clear_cache(m->c, NULL);
     }
-    memset(m->contents, 0, m->len);
+
+
+    //memset(m->contents, 0, m->len);
 }
 
 void free_mem(mem_t m)
 {
     if(m->c)
         free_cache(m->c);
-    free((void *) m->contents);
+
+    delete m->m;
+
+    //free((void *) m->contents);
     free((void *) m);
 }
 
@@ -176,7 +189,9 @@ void free_mem(mem_t m)
 mem_t copy_mem(mem_t oldm)
 {
     mem_t newm = init_mem(oldm->len);
-    memcpy(newm->contents, oldm->contents, oldm->len);
+    *newm->m = *oldm->m;
+
+    //memcpy(newm->contents, oldm->contents, oldm->len);
     return newm;
 }
 
@@ -185,11 +200,11 @@ mem_t copy_mem(mem_t oldm)
 bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile)
 {
     word_t pos;
-    int len = oldm->len;
+    int len = oldm->m->getLen();
     bool_t diff = FALSE;
-    if (newm->len < len)
-	len = newm->len;
-    for (pos = 0; (!diff || outfile) && pos < len; pos += 4) {
+    if (newm->m->getLen() < len)
+    len = newm->m->getLen();
+    for (pos = 0; (!diff || outfile) && pos+4 <= len; pos += 4) {
         word_t ov = 0;  word_t nv = 0;
 	get_word_val(oldm, pos, &ov);
 	get_word_val(newm, pos, &nv);
@@ -199,6 +214,7 @@ bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile)
 		fprintf(outfile, "0x%.4x:\t0x%.8x\t0x%.8x\n", pos, ov, nv);
 	}
     }
+    //return *oldm->m != *newm->m;
     return diff;
 }
 
@@ -225,6 +241,8 @@ int load_mem(mem_t m, FILE *infile, int report_error)
     int addr = 0;
     char hexcode[15];
 
+
+
 #ifdef HAS_GUI
     /* For display */
     int line_no = 0;
@@ -232,38 +250,37 @@ int load_mem(mem_t m, FILE *infile, int report_error)
 #endif /* HAS_GUI */   
 
     int index = 0;
-
     while (fgets(buf, LINELEN, infile)) {
-	int cpos = 0;
-	empty_line = 1;
-	lineno++;
-	/* Skip white space */
-	while (isspace((int)buf[cpos]))
-	    cpos++;
+        int cpos = 0;
+        empty_line = 1;
+        lineno++;
+        /* Skip white space */
+        while (isspace((int)buf[cpos]))
+            cpos++;
 
-	if (buf[cpos] != '0' ||
-	    (buf[cpos+1] != 'x' && buf[cpos+1] != 'X'))
-	    continue; /* Skip this line */      
-	cpos+=2;
+        if (buf[cpos] != '0' ||
+                (buf[cpos+1] != 'x' && buf[cpos+1] != 'X'))
+            continue; /* Skip this line */
+        cpos+=2;
 
-	/* Get address */
-	bytepos = 0;
-	while (isxdigit((int)(c=buf[cpos]))) {
-	    cpos++;
-	    bytepos = bytepos*16 + hex2dig(c);
-	}
+        /* Get address */
+        bytepos = 0;
+        while (isxdigit((int)(c=buf[cpos]))) {
+            cpos++;
+            bytepos = bytepos*16 + hex2dig(c);
+        }
 
-	while (isspace((int)buf[cpos]))
-	    cpos++;
+        while (isspace((int)buf[cpos]))
+            cpos++;
 
-	if (buf[cpos++] != ':') {
-	    if (report_error) {
-		fprintf(stderr, "Error reading file. Expected colon\n");
-		fprintf(stderr, "Line %d:%s\n", lineno, buf);
-		fprintf(stderr,
-			"Reading '%c' at position %d\n", buf[cpos], cpos);
-	    }
-	    return 0;
+        if (buf[cpos++] != ':') {
+            if (report_error) {
+                fprintf(stderr, "Error reading file. Expected colon\n");
+                fprintf(stderr, "Line %d:%s\n", lineno, buf);
+                fprintf(stderr,
+                        "Reading '%c' at position %d\n", buf[cpos], cpos);
+            }
+            return 0;
 	}
 
 	addr = bytepos;
@@ -310,8 +327,9 @@ int load_mem(mem_t m, FILE *infile, int report_error)
 		line[index++] = c;
 	    }
 	    line[index] = '\0';
-	    if (!empty_line)
-		report_line(line_no++, addr, hexcode, line);
+        if (!empty_line){
+            report_line(line_no++, addr, hexcode, line);
+        }
 	}
 #endif /* HAS_GUI */ 
     }
@@ -323,6 +341,9 @@ int load_mem(mem_t m, FILE *infile, int report_error)
 
 bool_t get_byte_val(mem_t m, word_t pos, byte_t *dest)
 {
+    return m->m->getByte(pos, dest);
+
+
     bool_t ret;
     if(m->c){
         ret = get_cache_byte(m->c, pos, dest, m);
@@ -338,6 +359,7 @@ bool_t get_byte_val(mem_t m, word_t pos, byte_t *dest)
 
 bool_t get_word_val(mem_t m, word_t pos, word_t *dest)
 {
+    return m->m->getWord(pos, dest);
     bool_t ret;
     if(m->c){
         ret = get_cache_word(m->c, pos, dest, m);
@@ -519,6 +541,7 @@ void dump_cache(FILE *outfile, cache_t c, word_t s, int len)
 
 bool_t set_byte_val(mem_t m, word_t pos, byte_t val)
 {
+    return m->m->setByte(pos, val);
 
     word_t ret;
     if(m->c){
@@ -533,6 +556,7 @@ bool_t set_byte_val(mem_t m, word_t pos, byte_t val)
 
 bool_t set_word_val(mem_t m, word_t pos, word_t val)
 {
+    return m->m->setWord(pos, val);
     word_t ret;
     if(m->c){
         ret = set_cache_word(m->c, pos, val, m);
@@ -553,24 +577,27 @@ bool_t set_word_val(mem_t m, word_t pos, word_t val)
 
 void dump_memory(FILE *outfile, mem_t m, word_t pos, int len)
 {
+    m->m->dump(outfile, pos, len);
+    return;
+
     int i, j;
     while (pos % BPL) {
-	pos --;
-	len ++;
+        pos --;
+        len ++;
     }
 
     len = ((len+BPL-1)/BPL)*BPL;
 
     if (pos+len > m->len)
-	len = m->len-pos;
+        len = m->len-pos;
 
     for (i = 0; i < len; i+=BPL) {
-	word_t val = 0;
-	fprintf(outfile, "0x%.4x:", pos+i);
-	for (j = 0; j < BPL; j+= 4) {
-	    get_word_val(m, pos+i+j, &val);
-	    fprintf(outfile, " %.8x", val);
-	}
+        word_t val = 0;
+        fprintf(outfile, "0x%.4x:", pos+i);
+        for (j = 0; j < BPL; j+= 4) {
+            get_word_val(m, pos+i+j, &val);
+            fprintf(outfile, " %.8x", val);
+        }
     }
 }
 
@@ -629,9 +656,11 @@ word_t get_reg_val(mem_t r, int id)
 void set_reg_val(mem_t r, int id, word_t val)
 {
     if (id < REG_NONE) {
-	set_word_val(r,id*4,val);
+        set_word_val(r,id*4,val);
+
 #ifdef HAS_GUI
 	if (gui_mode) {
+        printf("about to sent signal");
 	    signal_register_update(id, val);
 	}
 #endif /* HAS_GUI */

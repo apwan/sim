@@ -1,3 +1,5 @@
+#ifndef STAGES_H
+#define STAGES_H
 /* 
  * stages.h - Defines the layout of the pipe registers
  * Declares the functions that implement the pipeline stages
@@ -88,4 +90,4 @@ void do_mem_stage();
 /* Set stalling conditions for different stages */
 void do_stall_check();
 
-
+#endif

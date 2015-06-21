@@ -15,7 +15,10 @@ HEADERS += misc/isa.h \
            pipe/pipeline.h \
            pipe/sim.h \
            pipe/stages.h \
-           seq/sim.h
+           seq/sim.h \
+    pipe/utils.h \
+    pipe/simulator.h \
+    pipe/psim_gui.hpp
 YACCSOURCES += misc/hcl.y
 SOURCES += misc/examples.c \
            misc/isa.c \
@@ -26,4 +29,9 @@ SOURCES += misc/examples.c \
            pipe/ncopy.c \
            pipe/psim.c \
            seq/ssim.c \
-           y86-code/len2.c
+           y86-code/len2.c \
+    pipe/psim_main.c \
+    pipe/psim_gui.c \
+    pipe/utils.c \
+    pipe/simulator.c \
+    misc/mem.c

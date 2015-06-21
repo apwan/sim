@@ -18,7 +18,7 @@ quote '#include "isa.h"'
 quote '#include "pipeline.h"'
 quote '#include "stages.h"'
 quote '#include "sim.h"'
-quote 'int sim_main(int argc, char *argv[]);'
+#quote 'int sim_main(int argc, char *argv[]);'
 quote 'int main(int argc, char *argv[]){return sim_main(argc,argv);}'
 
 ####################################################################

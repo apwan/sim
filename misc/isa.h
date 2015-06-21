@@ -1,3 +1,5 @@
+#ifndef ISA_H
+#define ISA_H
 /* Instruction Set definition for Y86 Architecture */
 /* Revisions:
    2009-03-11:
@@ -11,7 +13,13 @@
 #define DEBUG(m) //printf(m)
 #define DEBUGP(m,n) //printf(m,n)
 
-
+#ifdef __cplusplus
+#define CPPBEGIN extern "C" {
+#define CPPEND }
+#else
+#define CPPBEGIN
+#define CPPEND
+#endif
 
 
 /**************** Registers *************************/
@@ -68,6 +76,7 @@ char *iname(int instr);
 typedef bool bool_t;
 #define FALSE false
 #define TRUE true
+#define BPL 32
 
 /* Table used to encode information about instructions */
 typedef struct {
@@ -104,17 +113,10 @@ typedef int word_t;
 #define CACHE_MASK(s) (~((-1)<<(s)))
 #define MASK(s,t) ((-1<<(t))^(-1<<(s)))
 
-#define IS_VALID(f) ((f>>7)&0x1)
-#define IS_DIRTY(f) ((f>>6)&0x1)
 
 
-typedef struct{
-    int len;
-    byte_t *priv;
-    int max_priv;
-    byte_t *shrd;
-    int fd;
-} *mix_mem_rec, *mix_mem_t;
+
+
 
 typedef struct {
     byte_t valid:1;
@@ -131,18 +133,52 @@ typedef struct{
     cache_line *contents;
 } cache_rec, *cache_t;
 
+
+CPPBEGIN
+
+class MemRec {
+public:
+    MemRec(int l);
+    ~MemRec();
+
+    int getLen();
+    bool_t getByte(word_t pos, byte_t *dest);
+    bool_t getWord(word_t pos, word_t *dest);
+    bool_t setByte(word_t pos, byte_t val);
+    bool_t setWord(word_t pos, word_t val);
+    void dump(FILE *outfile, word_t pos, int l);
+    bool_t clear();
+
+    MemRec &operator=(const MemRec &);
+    bool_t operator!=(const MemRec &);
+private:
+    int len;
+    word_t maxaddr;
+    byte_t *contents;
+};
+
 /* Represent a memory as an array of bytes */
 typedef struct {
   int len;
   word_t maxaddr;
-  byte_t *contents;
+  MemRec *m;
   cache_t c;
 } mem_rec, *mem_t;
 
+CPPEND
 
-#ifdef __cpluscplus
-extern "C" {
-#endif
+typedef struct{
+    int len;
+    byte_t *priv;
+    int max_priv;
+    byte_t *shrd;
+    int fd;
+} *mix_mem_rec, *mix_mem_t;
+
+
+
+
+CPPBEGIN
 
 /* Create a memory with len bytes */
 mem_t init_mem(int len);
@@ -221,9 +257,8 @@ word_t get_reg_val(mem_t r, int id);
 void set_reg_val(mem_t r, int id, word_t val);
 void dump_reg(FILE *outfile, mem_t r);
 
-#ifdef __cpluscplus
-}
-#endif
+
+CPPEND
 
 /* ****************  ALU Function **********************/
 
@@ -273,24 +308,23 @@ bool_t diff_state(state_ptr olds, state_ptr news, FILE *outfile);
 bool_t cond_holds(cc_t cc, cond_t bcond);
 
 /* Execute single instruction.  Return status. */
-#ifdef __cpluscplus
-extern "C" {
-#endif
+
+
+
 stat_t step_state(state_ptr s, FILE *error_file);
-#ifdef __cpluscplus
-}
-#endif
+
 
 /************************ Interface Functions *************/
 
 #ifdef HAS_GUI
-#ifdef __cplusplus
-extern "C" {
-#endif
+
+CPPBEGIN
+
 void report_line(int line_no, int addr, char *hexcode, char *line);
 void signal_register_update(int r, int val);
-#ifdef __cplusplus
-}
+
+CPPEND
+
 #endif
 
 #endif

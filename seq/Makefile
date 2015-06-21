@@ -23,7 +23,7 @@ TKINC=-isystem /usr/include
 # flags.
 
 CC=g++
-CFLAGS=-Wall -O2
+CFLAGS=-Wall -O2 -BIG_MEM
 
 ##################################################
 # You shouldn't need to modify anything below here
@@ -42,7 +42,7 @@ ssim: seq-$(VERSION).hcl ssim.c  sim.h $(MISCDIR)/isa.c $(MISCDIR)/isa.h
 	# Building the seq-$(VERSION).hcl version of SEQ
 	$(HCL2C) -n seq-$(VERSION).hcl <seq-$(VERSION).hcl >seq-$(VERSION).c
 	$(CC) $(CFLAGS) $(INC) -o ssim \
-		seq-$(VERSION).c ssim.c $(MISCDIR)/isa.c $(LIBS)
+		seq-$(VERSION).c ssim.c $(MISCDIR)/isa.c $(MISCDIR)/mem.c $(LIBS)
 
 # This rule builds the SEQ+ simulator (ssim+)
 ssim+: seq+-std.hcl ssim.c sim.h $(MISCDIR)/isa.c $(MISCDIR)/isa.h

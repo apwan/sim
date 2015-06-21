@@ -1,5 +1,14 @@
 #ifndef SIM_H
 #define SIM_H
+
+#include "isa.h"
+#include "pipeline.h"
+#include "stages.h"
+#include "utils.h"
+
+
+#define CMARK(msg) printf(msg);
+
 /********** Typedefs ************/
 
 /* EX stage mux settings */
@@ -22,6 +31,29 @@ typedef enum { IF_STAGE, ID_STAGE, EX_STAGE, MEM_STAGE, WB_STAGE } stage_id_t;
 
 
 /************ Global state declaration ****************/
+void report_pc(unsigned fpc, unsigned char fpcv,
+           unsigned dpc, unsigned char dpcv,
+           unsigned epc, unsigned char epcv,
+           unsigned mpc, unsigned char mpcv,
+           unsigned wpc, unsigned char wpcv);
+
+void report_state(char *id, int current, char *txt);
+
+/*************** Bubbled version of stages *************/
+
+/*
+extern pc_ele bubble_pc;
+extern if_id_ele bubble_if_id;
+extern id_ex_ele bubble_id_ex;
+
+extern ex_mem_ele bubble_ex_mem;
+
+extern mem_wb_ele bubble_mem_wb;
+
+*/
+
+
+
 
 /* How many cycles have been simulated? */
 extern int cycles;
@@ -40,6 +72,11 @@ extern mem_t reg;
 /* Condition code register */
 extern cc_t cc;
 extern stat_t stat;
+
+
+
+
+
 
 /* Operand sources in EX (to show forwarding) */
 extern mux_source_t amux, bmux;
@@ -94,7 +131,36 @@ extern sim_mode_t sim_mode;
 /* Log file */
 extern FILE *dumpfile;
 
+
+/* main */
+//void usage(char *name); /* Print helpful usage message */
+int sim_main(int argc, char *argv[]);
+//void run_tty_sim();               /* Run simulator in TTY mode */
+/* Simulator name defined and initialized by the compiled HCL file */
+/* according to the -n argument supplied to hcl2c */
+extern  char simname[];
+
+/* Parameters modifed by the command line */
+extern int gui_mode;    /* Run in GUI mode instead of TTY mode? (-g) */
+extern bool Use_Class;
+
+#define MAXBUF 1024
+#define DEFAULTNAME "Y86 Simulator: "
+
+#define MAXARGS 128
+#define MAXBUF 1024
+#define TKARGS 3
+
+#define MAX_STAGE 10
+
+/* End main */
+
 /*************** Simulation Control Functions ***********/
+
+
+
+
+
 
 /* Bubble next execution of specified stage */
 void sim_bubble_stage(stage_id_t stage);
@@ -134,24 +200,30 @@ void sim_log( const char *format, ... );
 
  
 /******************* GUI Interface Functions **********************/
-//#define HAS_GUI
 #ifdef HAS_GUI
-#ifdef __cpluscplus
-extern "C" {
+#include <tk.h>
 #endif
+
+char *format_pc(pc_ptr state);
+char *format_if_id(if_id_ptr state);
+char *format_id_ex(id_ex_ptr state);
+char *format_ex_mem(ex_mem_ptr state);
+char *format_mem_wb(mem_wb_ptr state);
+
+//#define HAS_GUI
+
+
+extern char tcl_msg[256];
+
+/* Keep track of the TCL Interpreter */
+extern Tcl_Interp *sim_interp;
+
+extern mem_t post_load_mem;
+
 
 void signal_sources();
 void signal_register_clear();
 
-
-
-void report_pc(unsigned fpc, unsigned char fpcv,
-	       unsigned dpc, unsigned char dpcv,
-	       unsigned epc, unsigned char epcv,
-	       unsigned mpc, unsigned char mpcv,
-	       unsigned wpc, unsigned char wpcv);
-
-void report_state(char *id, int current, char *txt);
 
 void show_cc(cc_t cc);
 void show_cpi();
@@ -159,6 +231,15 @@ void show_stat(stat_t stat);
 
 void create_memory_display();
 void set_memory(int addr, int val);
+
+
+#ifdef HAS_GUI
+#ifdef __cpluscplus
+extern "C" {
+#endif
+
+
+
 
 #ifdef __cpluscplus
 }
