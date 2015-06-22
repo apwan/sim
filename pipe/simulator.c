@@ -21,14 +21,14 @@ void Simulator::tty_sim(){
 
     /* In TTY mode, the default object file comes from stdin */
     if (!object_file) {
-    object_file = stdin;
+         object_file = stdin;
     }
 
     if (verbosity >= 2)
         setDumpFile(stdout);
 
     init();
-    //mem->c = init_cache(6, 8, mem);
+    // init_cache(6, 8, mem);
 
 
     /* Emit simulator name */
@@ -38,7 +38,7 @@ void Simulator::tty_sim(){
 
 
     printf("file: %s\n", this->object_filename);
-    byte_cnt = load_mem(mem, object_file, 1);
+    byte_cnt = mem->load(object_file, 1);
     CMARK("finish load mem\n")
 
 
@@ -52,12 +52,7 @@ void Simulator::tty_sim(){
 
 
     if (do_check) {
-        isa_state = new_state(0);
-        free_mem(isa_state->r);
-        free_mem(isa_state->m);
-        isa_state->m = copy_mem(mem);
-        isa_state->r = copy_mem(reg);
-        isa_state->cc = cc;
+        isa_state = new StateRec(mem,reg,cc);
     }
 
     mem0 = copy_mem(mem);
@@ -114,8 +109,8 @@ void Simulator::tty_sim(){
 
     /* Emit CPI statistics */
     {
-    double cpi = instructions > 0 ? (double) cycles/instructions : 1.0;
-    printf("CPI: %d cycles/%d instructions = %.2f\n",
+        double cpi = instructions > 0 ? (double) cycles/instructions : 1.0;
+        printf("CPI: %d cycles/%d instructions = %.2f\n",
            cycles, instructions, cpi);
     }
 

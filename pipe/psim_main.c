@@ -66,28 +66,31 @@ void run_tty_sim(sim_config conf)
     if (conf.verbosity >= 2)
         sim_set_dumpfile(stdout);
     sim_init();
-    //mem->c = init_cache(6, 8, mem);
+    // init_cache(6, 8, mem);
 
 
     /* Emit simulator name */
     if (conf.verbosity >= 2)
-    printf("%s\n", simname);
+        printf("%s\n", simname);
 
-    byte_cnt = load_mem(mem, conf.object_file, 1);
+    byte_cnt = mem->load(conf.object_file, 1);
     if (byte_cnt == 0) {
-    fprintf(stderr, "No lines of code found\n");
-    exit(1);
+        fprintf(stderr, "No lines of code found\n");
+        exit(1);
     } else if (conf.verbosity >= 2) {
-    printf("%d bytes of code read\n", byte_cnt);
+        printf("%d bytes of code read\n", byte_cnt);
     }
     fclose(conf.object_file);
     if (conf.do_check) {
+        isa_state = new StateRec(mem,reg,cc);
+    /*
     isa_state = new_state(0);
     free_mem(isa_state->r);
     free_mem(isa_state->m);
     isa_state->m = copy_mem(mem);
     isa_state->r = copy_mem(reg);
     isa_state->cc = cc;
+    */
     }
 
     mem0 = copy_mem(mem);
@@ -104,33 +107,33 @@ void run_tty_sim(sim_config conf)
         diff_mem(mem0, mem, stdout);
     }
     if (conf.do_check) {
-    byte_t e = STAT_AOK;
-    int step;
-    bool_t match = TRUE;
+        byte_t e = STAT_AOK;
+        int step;
+        bool_t match = TRUE;
 
-    printf("start stepping\n");
-    for (step = 0; step < conf.instr_limit && e == STAT_AOK; step++) {
-        e = step_state(isa_state, stdout);
-    }
+        printf("start stepping\n");
+        for (step = 0; step < conf.instr_limit && e == STAT_AOK; step++) {
+            e = step_state(isa_state, stdout);
+        }
 
     if (diff_reg(isa_state->r, reg, NULL)) {
         match = FALSE;
         if (conf.verbosity > 0) {
-        printf("ISA Register != Pipeline Register File\n");
-        diff_reg(isa_state->r, reg, stdout);
+            printf("ISA Register != Pipeline Register File\n");
+            diff_reg(isa_state->r, reg, stdout);
         }
     }
     if (diff_mem(isa_state->m, mem, NULL)) {
         match = FALSE;
         if (conf.verbosity > 0) {
-        printf("ISA Memory != Pipeline Memory\n");
-        diff_mem(isa_state->m, mem, stdout);
+            printf("ISA Memory != Pipeline Memory\n");
+            diff_mem(isa_state->m, mem, stdout);
         }
     }
     if (isa_state->cc != result_cc) {
         match = FALSE;
         if (conf.verbosity > 0) {
-        printf("ISA Cond. Codes (%s) != Pipeline Cond. Codes (%s)\n",
+            printf("ISA Cond. Codes (%s) != Pipeline Cond. Codes (%s)\n",
                cc_name(isa_state->cc), cc_name(result_cc));
         }
     }

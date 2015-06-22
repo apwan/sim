@@ -41,16 +41,6 @@ void report_state(char *id, int current, char *txt);
 
 /*************** Bubbled version of stages *************/
 
-/*
-extern pc_ele bubble_pc;
-extern if_id_ele bubble_if_id;
-extern id_ex_ele bubble_id_ex;
-
-extern ex_mem_ele bubble_ex_mem;
-
-extern mem_wb_ele bubble_mem_wb;
-
-*/
 
 
 
@@ -233,19 +223,6 @@ void create_memory_display();
 void set_memory(int addr, int val);
 
 
-#ifdef HAS_GUI
-#ifdef __cpluscplus
-extern "C" {
-#endif
 
-
-
-
-#ifdef __cpluscplus
-}
-#endif
-
-
-#endif
 								       
 #endif

@@ -7,18 +7,21 @@
 
 /* memory */
 
-int MemRec::getLen(){
-    return len;
-}
-
+MemRec::MemRec():len(0),contents(NULL),ca(NULL){}
 MemRec::MemRec(int l):len(((l+BPL-1)/BPL)*BPL),
-    contents(new byte_t[l]){
+    contents(new byte_t[l]),ca(NULL){
 }
 MemRec::MemRec(const MemRec &m):len(m.len),contents(new byte_t[len]){
     memcpy(contents, m.contents, len);
 }
 MemRec::~MemRec(){
     delete []contents;
+    if(ca){
+        delete ca;
+    }
+}
+int MemRec::getLen(){
+    return len;
 }
 
 MemRec &MemRec::operator=(const MemRec &m){
@@ -111,6 +114,24 @@ bool_t MemRec::setWord(word_t pos, word_t val){
     }
 }
 
+bool_t MemRec::getCacheByte(word_t pos, byte_t *dest){
+    return ca? ca->getByte(pos,dest): getByte(pos,dest);
+}
+
+bool_t MemRec::getCacheWord(word_t pos, word_t *dest){
+    return ca? ca->getWord(pos,dest):getWord(pos,dest);
+}
+
+bool_t MemRec::setCacheByte(word_t pos, byte_t val){
+    return ca? ca->setByte(pos,val): setByte(pos,val);
+}
+
+bool_t MemRec::setCacheWord(word_t pos, word_t val){
+    return ca? ca->setWord(pos,val): setWord(pos,val);
+}
+
+
+
 #define LINELEN 4096
 int MemRec::load(FILE *infile, int report_error){
     /* Read contents of .yo file */
@@ -184,7 +205,8 @@ int MemRec::load(FILE *infile, int report_error){
             return 0;
         }
         byte = (hex2dig(ch)<<4)+hex2dig(cl);
-        contents[bytepos++] = byte;
+        setByte(bytepos++, byte);
+
 
         byte_cnt++;
         empty_line = 0;
@@ -215,6 +237,13 @@ int MemRec::load(FILE *infile, int report_error){
 #endif /* HAS_GUI */
     }
     return byte_cnt;
+}
+
+bool_t MemRec::useCache(int b, int s, int E, int t){
+    if(ca){
+        delete ca;
+    }
+    ca = new CacheRec(this,b,s,E,t);
 }
 
 /* REG */
@@ -257,175 +286,211 @@ void RegRec::dump(FILE *outfile){
 
 
 /*  CACHE  */
-
-
-
-
-cache_t init_cache(int s, int E){
-    cache_t res = (cache_t) malloc(sizeof(cache_rec));
-    res->cac_s = s;
-    res->cac_E = E;
-    res->len = E<<s;
-    res->contents = (cache_line*) calloc(res->len, sizeof(cache_line));
-    return res;
+CacheRec::CacheRec(mem_t target, int b, int s, int E, int t):
+    MemRec(),tm(target),
+    cb(b),cB(1<<b),cs(s),cS(1<<s),cE(E),ct(t),nlines(E<<s),
+    valid(new bool_t[nlines]),dirty(new bool_t[nlines]),tags(new byte_t[nlines]){
+    len = target->getLen();
+    contents = new byte_t[nlines<<b];
 }
 
-void clear_cache(cache_t c, mem_t m){
-    int i;
-    if(m){
-        for(i=0;i<c->len;++i){
-            evict_cache(c, i, m);
+CacheRec::~CacheRec(){
+    delete []contents;
+    delete []valid;
+    delete []dirty;
+    delete []tags;
+}
+
+void CacheRec::clear(bool_t wb){
+    if(wb){ /* write back */
+        int i;
+        for(i=0;i<nlines;++i){
+            commit(i);
         }
     }
-    memset(c->contents, 0, c->len*sizeof(cache_line));
+    memset(valid,0,nlines);
+    memset(dirty,0,nlines);
+    memset(tags,0,nlines);
+    memset(contents,0,nlines<<cb);
 }
 
-void free_cache(cache_t c){
-    free((void*)c->contents);
-    free((void*)c);
-}
-
-
-
-
-bool_t evict_cache(cache_t c, word_t i, mem_t m){
-    /* write back */
-    if(i<0 || i>c->len) return FALSE;
-    if(!c->contents[i].dirty || !c->contents[i].valid) return TRUE;
-
-    word_t pos = (((c->contents[i].tag<<c->cac_s) | (i/c->cac_E))) << CACHE_b;
-    int j; word_t val;
-    for(j=0;j<CACHE_B;j+=4){
-        memcpy(&val, c->contents[i].block+j, 4);
-        m->setWord(pos+j, val);
+bool_t CacheRec::commit(word_t i){
+    if(valid[i] && dirty[i]){
+        word_t pos = makePos(tags[i],i/cE);
+        byte_t *cur = contents + i*cB;
+        byte_t *end = cur + cB;
+        for(;cur<end;cur+=4,pos+=4){/* not shared */
+            if(! tm->setWord(pos,*(word_t *)cur))
+                printf("write back fail.\nCache line: %d, Mem pos: %d\n",i,pos);
+        }
+        dirty[i] = FALSE;
+        return TRUE;
+    }else{
+        return FALSE;
     }
-    c->contents[i].dirty = FALSE;
-    return TRUE;
 }
 
-bool_t retr_cache(cache_t c, byte_t tag, word_t i, mem_t m){
-    if(i<0 || i>c->len) return FALSE;
-    c->contents->tag = tag;
-    word_t pos = ((tag<<c->cac_s) | (i/c->cac_E))<<CACHE_b;
-    int j; word_t val;
-    for(j=0;j<CACHE_B;j+=4){
-        m->getWord(pos+j,&val);
-        memcpy(c->contents[i].block+j, &val, 4);
+word_t CacheRec::invalidate(word_t pos, bool_t wb){
+    int i;
+    if((i=findLine(pos))<0)
+        return -1;
+    if(wb && dirty[i]){/* write back */
+        commit(i);
     }
-    c->contents[i].valid = TRUE;
-    c->contents[i].dirty = FALSE;
-    return TRUE;
+    valid[i] = FALSE;
+    return i;
 }
 
+word_t CacheRec::findLine(word_t pos, bool_t forced,int *offsetPtr){
+    int setIndex; byte_t tag;
+    if(parsePos(pos,&setIndex,&tag,offsetPtr)){
+        int i = setIndex*cE;
+        int end = i + cE;
+        for(;i<end;++i){
+            if(valid[i] && tags[i]==tag)
+                return i;
+        }
+        if(forced){
+            if((i=spareLine(setIndex))<0){// no spare line
+                i = setIndex*cE + rand()%cE;// evict random one
+                commit(i); // write back
+            }
+            retrieve(tag,i);
+            return i;
+        }
+    }
+    return -1;
+}
 
-word_t search_cache(cache_t c, word_t pos, mem_t m){
-
-    word_t s = MASK(c->cac_s,0) & (pos >> CACHE_b);
-    byte_t t = CACHE_TAG_MASK & (pos>>(CACHE_b+c->cac_s));
-    word_t i = s * c->cac_E;
-    word_t e = i + c->cac_E;
-    for(; i<e;++i){
-        if(c->contents[i].valid && t == c->contents[i].tag)
+word_t CacheRec::spareLine(int setIndex){
+    int i = setIndex*cE;
+    int end = i + cE;
+    for(;i<end;++i){
+        if(!valid[i])
             return i;
     }
-    if(m == NULL)
-        return -1;
-    printf("\n%d, Cache Miss\n", pos);
+    return -1;
 
-    for (i=s*c->cac_E;i<e;++i){
-        if(c->contents[i].valid)
-            continue;
-        else
-            break;
-    }
-    if(i>=e){
-        i = s+rand()%c->cac_E;
-        evict_cache(c, i, m);
-    }
-    retr_cache(c, t, i, m);
-    dump_cache(stdout, c, i, 1);
-    return i;
 }
 
+bool_t CacheRec::retrieve(byte_t tag, word_t i){
+    word_t pos = makePos(tag, i/cE);
+    word_t end = pos+cB;
+    if(end>len) return FALSE;
 
-
-bool_t get_cache_byte(cache_t c, word_t pos, byte_t *dest, mem_t m){
-    if (pos < 0 || pos >= m->getLen())
-        return FALSE;
-    int i = search_cache(c, pos, m);
-    word_t p = pos & CACHE_MASK(CACHE_b);
-    *dest = c->contents[i].block[p];
-
+    byte_t *cur = contents + i*cB;
+    for(;pos<end;cur+=4,pos+=4){/* not shared */
+        if(! tm->getWord(pos,(word_t *)cur))
+            printf("cache retrieve fail.\nCache line: %d, Mem pos: %d\n",i,pos);
+    }
+    tags[i] = tag;
+    valid[i] = TRUE;
+    dirty[i] = FALSE;
     return TRUE;
 }
 
-bool_t get_cache_word(cache_t c, word_t pos, word_t *dest, mem_t m){
-    if (pos < 0 || pos+4 > m->getLen())
-        return FALSE;
-    word_t i = search_cache(c, pos, m);
-    word_t p = pos & MASK(CACHE_b,0);
-    word_t d = CACHE_B - p;
-
-    if(d>=4){
-        memcpy(dest, c->contents[i].block+p, 4);
+bool_t CacheRec::getByte(word_t pos, byte_t *dest){
+    int offset;
+    word_t i = findLine(pos, TRUE, &offset);
+    if(i>=0){
+        *dest = contents[(i<<cb)+offset];
+        return TRUE;
     }else{
-        printf("word exceeds\n");
-        memcpy(dest, c->contents[i].block+p, d);
-        word_t i = search_cache(c, pos+d, m);
-        memcpy((byte_t*)dest+d, c->contents[i].block, 4-d);
+        return FALSE; // invalid pos
+    }
+
+}
+
+bool_t CacheRec::getWord(word_t pos, word_t *dest){
+    int offset;// may jump across lines
+    if(pos+4>len) return FALSE;
+    word_t i = findLine(pos, TRUE, &offset);
+    int d = cB-offset;
+    byte_t *start = contents+(i<<cb)+offset;
+    if(d<4){// exceed
+        memcpy(dest,start,d);
+        i = findLine(pos+d, TRUE);
+        memcpy(((byte_t*)dest)+d, contents+(i<<cb), 4-d);
+        printf("cross-line word %d at pos %d\n", *dest, pos);
+    }else{
+        *dest = *(word_t *)start;
     }
     return TRUE;
 }
 
-word_t set_cache_byte(cache_t c, word_t pos, byte_t val, mem_t m){
-    if (pos < 0 || pos >= m->getLen())
-        return -1;
-    word_t i = search_cache(c, pos, m);
-    c->contents[i].block[pos&MASK(CACHE_b,0)] = val;
-    c->contents[i].dirty = TRUE;
-    return i;
-}
-
-word_t set_cache_word(cache_t c, word_t pos, word_t val, mem_t m){
-    if (pos < 0 || pos >= m->getLen())
-        return -1;
-    word_t i = search_cache(c, pos, m);
-    word_t p = pos&CACHE_MASK(CACHE_b);
-    word_t d = CACHE_B - p;
-
-    if(d>=4){
-        memcpy(c->contents[i].block+p, &val, 4);
-        c->contents[i].dirty = TRUE;
+bool_t CacheRec::setByte(word_t pos, byte_t val){
+    int offset;
+    word_t i = findLine(pos, TRUE, &offset);
+    if(i>=0){
+        contents[(i<<cb)+offset] = val;
+        dirty[i] = TRUE;
     }else{
-        printf("word exceeds\n");
-        memcpy(c->contents[i].block+p, &val, d);
-        c->contents[i].dirty = TRUE;
-        word_t i = search_cache(c, pos+d, m);
-        memcpy(c->contents[i].block, (byte_t*)&val + d, 4-d);
-        c->contents[i].dirty = TRUE;
+        return FALSE; // invalid pos
     }
-    return i;
 }
 
-void dump_cache(FILE *outfile, cache_t c, word_t s, int len)
-{
-    int i, j;
-    word_t e = s+len;
-    if (e > c->len)
-        e = c->len;
+bool_t CacheRec::setWord(word_t pos, word_t val){
+    int offset;// may jump across lines
+    if(pos+4>len) return FALSE;
+    word_t i = findLine(pos, TRUE, &offset);
+    int d = cB-offset;
+    byte_t *start = contents+(i<<cb)+offset;
+    if(d<4){// exceed
+        memcpy(start,&val,d);
+        i = findLine(pos+d, TRUE);
+        memcpy(contents+(i<<cb), ((byte_t*)&val)+d, 4-d);
+        printf("cross-line word %d at pos %d\n", val, pos);
+    }else{
+        *(word_t *)start = val;
+    }
+    return TRUE;
+}
 
-    for (i = s; i < e; ++i) {
+word_t CacheRec::makePos(byte_t tag, int setIndex, int offset){
+#ifdef CHECK_CACHE_POS
+        tag &= CACHE_MASK(ct);
+        setIndex &= CACHE_MASK(cs);
+        offset &= CACHE_MASK(offset);
+#endif
+    return (((tag<<cs)|setIndex)<<cb)|offset;
+}
+
+bool_t CacheRec::parsePos(word_t pos, int *indexPtr, byte_t *tagPtr, int *offsetPtr){
+    if(pos<0 || pos>=len){
+        return FALSE;
+    }
+    if(offsetPtr){
+        *offsetPtr = CACHE_MASK(cb) & pos;
+    }
+    pos = ((unsigned int)pos)>>cb;
+    *indexPtr = CACHE_MASK(cs) & pos;
+    pos = pos>>cs;
+    *tagPtr = CACHE_MASK(ct) & pos;
+    return TRUE;
+
+}
+
+
+
+
+
+void CacheRec::dump(FILE *outfile, word_t s, int l){
+    word_t end = s+l;
+    if(end>nlines)
+        end = nlines;
+    int i,j;
+    for(i=s;i<end;++i){
         word_t val = 0;
-        fprintf(outfile, "\n0x%.4x:", i);
-        fprintf(outfile, "valid:%.2x,dirty:%.2x\n", c->contents[i].valid, c->contents[i].dirty);
-        for (j = 0; j < CACHE_B; j+= 4) {
-            memcpy(&val, c->contents[i].block+j, 4);
+        byte_t *start = contents+(i<<cb);
+        fprintf(outfile, "\n0x%.4x: ", i);
+        fprintf(outfile, "valid %.2x, dirty %.2x\n", valid[i], dirty[i]);
+        for (j = 0; j < cB; j+= 4) {
+            memcpy(&val, start+j, 4);
             fprintf(outfile, " %.8x", val);
         }
         fprintf(outfile, "\n");
     }
 }
-
 
 
 

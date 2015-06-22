@@ -104,20 +104,42 @@ typedef int word_t;
 
 CPPBEGIN
 
+/* Cache */
+
+#define CACHE_m 16 // virtual address bits
+
+#define CACHE_b 4 // block bits
+#define CACHE_B (1<<CACHE_b) // block size
+#define CACHE_s 6 // set index bits
+#define CACHE_S (1<<CACHE_s) // number of sets
+#define CACHE_E 16 // lines per set
+#define CACHE_t 6 // tag bits
+#define CACHE_MASK(s) (~((-1)<<(s)))
+#define MASK(s,t) ((-1<<(t))^(-1<<(s)))
+
+//forward declaration
+class CacheRec;
+
 class MemRec {
 public:
+    MemRec();
     MemRec(int l);
     MemRec(const MemRec&);
     ~MemRec();
 
     int getLen();
-    bool_t getByte(word_t pos, byte_t *dest);
-    bool_t getWord(word_t pos, word_t *dest);
-    bool_t setByte(word_t pos, byte_t val);
-    bool_t setWord(word_t pos, word_t val);
-    void dump(FILE *outfile, word_t pos, int l);
-    bool_t clear();
+    virtual bool_t getByte(word_t pos, byte_t *dest);
+    virtual bool_t getWord(word_t pos, word_t *dest);
+    virtual bool_t setByte(word_t pos, byte_t val);
+    virtual bool_t setWord(word_t pos, word_t val);
+    virtual void dump(FILE *outfile, word_t pos, int l);
+    virtual bool_t clear();
     int load(FILE *infile, int report_error);
+
+    bool_t getCacheByte(word_t pos, byte_t *dest);
+    bool_t getCacheWord(word_t pos, word_t *dest);
+    bool_t setCacheByte(word_t pos, byte_t val);
+    bool_t setCacheWord(word_t pos, word_t val);
 
     MemRec &operator=(const MemRec &);
     bool_t operator!=(const MemRec &);
@@ -130,11 +152,10 @@ protected:
     int len;
     //word_t maxaddr;
     byte_t *contents;
+    CacheRec *ca; //cache
+    bool_t useCache(int b=CACHE_b, int s=CACHE_s, int E=CACHE_E, int t=CACHE_t);
 };
 
-/* Represent a memory as an array of bytes */
-
-CPPEND
 
 typedef struct{
     int len;
@@ -147,11 +168,6 @@ typedef struct{
 
 
 
-CPPBEGIN
-
-
-
-
 /* How big should the memory be? */
 #ifdef BIG_MEM
 #define MEM_SIZE (1<<16)
@@ -159,17 +175,16 @@ CPPBEGIN
 #define MEM_SIZE (1<<13)
 #endif
 
-#define get_byte_val(MEM,pos,dest) (MEM)->getByte(pos,dest)
-#define get_word_val(MEM,pos,dest) (MEM)->getWord(pos,dest)
-#define set_byte_val(MEM,pos,val) (MEM)->setByte(pos,val)
-#define set_word_val(MEM,pos,val) (MEM)->setWord(pos,val)
+#define get_byte_val(MEM,pos,dest) (MEM)->getCacheByte(pos,dest)
+#define get_word_val(MEM,pos,dest) (MEM)->getCacheWord(pos,dest)
+#define set_byte_val(MEM,pos,val) (MEM)->setCacheByte(pos,val)
+#define set_word_val(MEM,pos,val) (MEM)->setCacheWord(pos,val)
 #define dump_memory(outfile, MEM, pos, len) (MEM)->dump(outfile,pos,len)
 #define clear_mem(MEM) (MEM)->clear()
 #define copy_mem(MEM) new MemRec(*MEM)
 #define init_mem(len) new MemRec(len)
-#define free_mem(MEM) delete MEM
-
-#define load_mem(MEM,infile,err) (MEM)->load(infile,err)
+#define free_mem(MEM) delete (MEM)
+#define load_mem(MEM,infile,report_err) (MEM)->load(infile,report_err)
 
 #define init_reg() new RegRec()
 #define free_reg(REG) delete (REG)
@@ -181,20 +196,6 @@ CPPBEGIN
 typedef MemRec* mem_t;
 
 
-/* Cache */
-
-#define CACHE_m 16
-
-#define CACHE_b 4
-#define CACHE_B (1<<CACHE_b)
-#define CACHE_s 6
-#define CACHE_S (1<<CACHE_s)
-#define CACHE_E 16
-
-#define CACHE_TAG_MASK 0x3F
-#define CACHE_MASK(s) (~((-1)<<(s)))
-#define MASK(s,t) ((-1<<(t))^(-1<<(s)))
-
 
 typedef struct {
     byte_t valid:1;
@@ -203,45 +204,37 @@ typedef struct {
     byte_t block[CACHE_B];
 } cache_line;
 
-typedef struct{
-    int cac_s;
-    int cac_E;
-    int len; /* number of cache_line */
-    cache_line *contents;
-} cache_rec, *cache_t;
 
-
-
-
-class Cache {
+class CacheRec: public MemRec {
 public:
-    Cache();
-    ~Cache();
-    void clear();
+    CacheRec(mem_t target, int b=CACHE_b, int s=CACHE_s, int E=CACHE_E, int t=CACHE_t);
+    ~CacheRec();
 
-    word_t find(word_t pos);
+    word_t findLine(word_t pos, bool_t forced=FALSE, int *offsetPtr=NULL);
+    word_t spareLine(int setIndex);
+    bool_t commit(word_t i);
+    word_t invalidate(word_t pos, bool_t wb = FALSE);
+    bool_t retrieve(byte_t tag, word_t i);
+    // override
+    bool_t getByte(word_t pos, byte_t *dest);
+    bool_t getWord(word_t pos, word_t *dest);
+    bool_t setByte(word_t pos, byte_t val);
+    bool_t setWord(word_t pos, word_t val);
+    void clear(bool_t wb=FALSE);/*wb: writeBack? */
+    void dump(FILE *outfile, word_t s, int l);
+
+private:
+    mem_t tm; // target mem
+    bool_t *valid, *dirty;
+    byte_t *tags;
+    int cb,cB,cs,cS,cE,ct;// cache params
+    int nlines;
+    word_t makePos(byte_t tag, int setIndex, int offset = 0);
+    bool_t parsePos(word_t pos, int *indexPtr, byte_t *tagPtr, int *offsetPtr=NULL);
 
 };
 
 
-
-cache_t init_cache(int s, int E);
-
-void free_cache(cache_t c);
-void clear_cache(cache_t c, mem_t m);
-
-
-word_t search_cache(cache_t c, word_t pos, mem_t m);
-bool_t evict_cache(cache_t c, word_t i, mem_t m);
-bool_t retr_cache(cache_t c, byte_t tag, word_t i, mem_t m);
-
-bool_t get_cache_byte(cache_t c, word_t pos, byte_t *dest, mem_t m);
-bool_t get_cache_word(cache_t c, word_t pos, word_t *dest, mem_t m);
-
-word_t set_cache_byte(cache_t c, word_t pos, byte_t val, mem_t m);
-word_t set_cache_word(cache_t c, word_t pos, word_t val, mem_t m);
-
-void dump_cache(FILE *outfile, cache_t c, word_t s, int len);
 
 
 /********** Implementation of Register File *************/
@@ -344,6 +337,7 @@ struct StateRec{
 
   StateRec(int memlen);
   StateRec(const StateRec&);
+  StateRec(mem_t mm, mem_t rr, cc_t c);
   ~StateRec();
   StateRec &operator=(const StateRec&);
   stat_t step(FILE *);
