@@ -5,14 +5,6 @@
 #include "isa.h"
 
 
-/* Are we running in GUI mode? */
-extern int gui_mode;
-
-/* Bytes Per Line = Block size of memory */
-
-
-
-
 reg_id_t find_register(char *name)
 {
     int i;
@@ -51,7 +43,8 @@ instr_t instruction_set[] =
     /* arg1hi indicates number of bytes */
     {"irmovl", HPACK(I_IRMOVL, F_NONE), 6, I_ARG, 2, 4, R_ARG, 1, 0 },
     {"rmmovl", HPACK(I_RMMOVL, F_NONE), 6, R_ARG, 1, 1, M_ARG, 1, 0 },
-    {"mrmovl", HPACK(I_MRMOVL, F_NONE), 6, M_ARG, 1, 0, R_ARG, 1, 1 },
+    /* mem addr stored in reg indicates by lo bits, so arg1hi=0 */
+    {"mrmovl", HPACK(I_MRMOVL, F_NONE), 6, M_ARG, 1, /* here */ 0, R_ARG, 1, 1 },
     /* add swap */
     {"rmswap",  HPACK(I_RMSWAP, F_NONE), 6, R_ARG, 1, 1, M_ARG, 1, 0},
     {"addl",   HPACK(I_ALU, A_ADD), 2, R_ARG, 1, 1, R_ARG, 1, 0 },
@@ -85,6 +78,12 @@ instr_t instruction_set[] =
 instr_t invalid_instr =
     {"XXX",     0   , 0, NO_ARG, 0, 0, NO_ARG, 0, 0 };
 
+instr_ptr bad_instr()
+{
+    return &invalid_instr;
+}
+
+
 instr_ptr find_instr(char *name)
 {
     int i;
@@ -105,62 +104,6 @@ char *iname(int instr) {
 }
 
 
-instr_ptr bad_instr()
-{
-    return &invalid_instr;
-}
-
-
-
-
-bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile)
-{
-    word_t pos;
-    int len = oldm->len;
-    bool_t diff = FALSE;
-    if (newm->len < len)
-    len = newm->len;
-    for (pos = 0; (!diff || outfile) && pos+4 <= len; pos += 4) {
-        word_t ov = 0;  word_t nv = 0;
-        oldm->getWord(pos, &ov);
-        newm->getWord(pos, &nv);
-	if (nv != ov) {
-	    diff = TRUE;
-	    if (outfile)
-		fprintf(outfile, "0x%.4x:\t0x%.8x\t0x%.8x\n", pos, ov, nv);
-	}
-    }
-    //return *oldm->m != *newm->m;
-    return diff;
-}
-
-
-
-
-
-
-
-bool_t diff_reg(mem_t oldr, mem_t newr, FILE *outfile)
-{
-    word_t pos;
-    int len = oldr->len;
-    bool_t diff = FALSE;
-    if (newr->len < len)
-    len = newr->len;
-    for (pos = 0; (!diff || outfile) && pos < len; pos += 4) {
-        word_t ov = 0;
-        word_t nv = 0;
-    oldr->getWord(pos, &ov);
-    newr->getWord(pos, &nv);
-	if (nv != ov) {
-	    diff = TRUE;
-	    if (outfile)
-		fprintf(outfile, "%s:\t0x%.8x\t0x%.8x\n",
-			reg_table[pos/4].name, ov, nv);
-	}
-    }
-    return diff;
-}
 
 
 
@@ -318,29 +261,41 @@ bool_t cond_holds(cc_t cc, cond_t bcond) {
     return jump;
 }
 
-StateRec::StateRec(mem_t mm, mem_t rr, cc_t c):pc(0),m(copy_mem(mm)),
-    r(copy_reg(rr)),cc(c){
-
+StateRec::StateRec(mem_t mm, mem_t rr, cc_t c){
+    pc = 0;
+    m = new MemRec(*mm);
+    r = new RegRec(*(RegRec*)rr);
+    cc = c;
 }
 
-StateRec::StateRec(int memlen):pc(0),r(init_reg()),
-    m(init_mem(memlen)),cc(DEFAULT_CC){
+StateRec::StateRec(int memlen){
+    pc = 0;
+    r = new RegRec();
+    m = new MemRec(memlen);
+    cc = DEFAULT_CC;
 }
 
-StateRec::StateRec(const StateRec& s):pc(s.pc),r(copy_reg(s.r)),
-    m(copy_mem(s.m)), cc(s.cc){
+StateRec::StateRec(const StateRec& s){
+    pc = s.pc;
+    r = new RegRec(*(RegRec*)s.r);
+    m = new MemRec(*s.m);
+    cc = s.cc;
 }
 
 StateRec::~StateRec(){
+
     delete r;
+    printf("reg released\n");
     delete m;
+    printf("mem released\n");
 }
 
 StateRec &StateRec::operator=(const StateRec& s){
     pc = s.pc;
-    *r = *(s.r);
-    *m = *(s.m);
+    r = new RegRec(*(RegRec*)s.r);
+    m = new MemRec(*s.m);
     cc = s.cc;
+    return *this;
 }
 
 stat_t StateRec::step(FILE *errFile){
@@ -349,7 +304,7 @@ stat_t StateRec::step(FILE *errFile){
 
 /* Execute single instruction.  Return status. */
 
-stat_t step_state(state_ptr s, FILE *error_file)
+stat_t step_state(state_ptr s, FILE *error_file, int gui_id)
 {
     word_t argA, argB;
     byte_t byte0 = 0;
@@ -366,6 +321,7 @@ stat_t step_state(state_ptr s, FILE *error_file)
     bool_t need_imm;
     word_t ftpc = s->pc;  /* Fall-through PC */
 
+
     if (!get_byte_val(s->m, ftpc, &byte0)) {
         if (error_file)
             fprintf(error_file,
@@ -377,27 +333,29 @@ stat_t step_state(state_ptr s, FILE *error_file)
     hi0 = (itype_t)HI4(byte0);
     lo0 = (alu_t)LO4(byte0);
 
-    /* add reg/mem dependency of I_RMSWAP */
 
+    /* add reg dependency of I_RMSWAP */
     need_regids =
 	(hi0 == I_RRMOVL || hi0 == I_ALU || hi0 == I_PUSHL ||
 	 hi0 == I_POPL || hi0 == I_IRMOVL || hi0 == I_RMMOVL ||
      hi0 == I_MRMOVL || hi0 == I_IADDL || hi0 == I_RMSWAP);
 
+
     if (need_regids) {
-	ok1 = get_byte_val(s->m, ftpc, &byte1);
-	ftpc++;
-    hi1 = (reg_id_t)HI4(byte1);
-    lo1 = (reg_id_t)LO4(byte1);
+        ok1 = get_byte_val(s->m, ftpc, &byte1);
+        ftpc++;
+        hi1 = (reg_id_t)HI4(byte1);
+        lo1 = (reg_id_t)LO4(byte1);
     }
 
+    /* add mem dependency of I_RMSWAP */
     need_imm =
 	(hi0 == I_IRMOVL || hi0 == I_RMMOVL || hi0 == I_MRMOVL ||
      hi0 == I_JMP || hi0 == I_CALL || hi0 == I_IADDL || hi0 == I_RMSWAP);
 
     if (need_imm) {
-	okc = get_word_val(s->m, ftpc, &cval);
-	ftpc += 4;
+        okc = get_word_val(s->m, ftpc, &cval);
+        ftpc += 4;
     }
 
     switch (hi0) {
@@ -477,7 +435,7 @@ stat_t step_state(state_ptr s, FILE *error_file)
                         s->pc, hi1);
             return STAT_INS;
         }
-        if (reg_valid(lo1))
+        if (reg_valid(lo1)) /* offset + base */
             cval += get_reg_val(s->r, lo1);
         val = get_reg_val(s->r, hi1);
         if (!set_word_val(s->m, cval, val)) {
@@ -517,7 +475,7 @@ stat_t step_state(state_ptr s, FILE *error_file)
         s->pc = ftpc;
         break;
 
-    case I_RMSWAP:
+    case I_RMSWAP: {
         if (!ok1) {
             if (error_file)
                 fprintf(error_file,
@@ -539,11 +497,14 @@ stat_t step_state(state_ptr s, FILE *error_file)
         }
         /* combine I_RMMOVL and I_MRMOVL */
         /* special part */
-        val = get_reg_val(s->r, hi1);
+        if (reg_valid(lo1))
+            cval += get_reg_val(s->r, lo1);
+
         if (!get_word_val(s->m, cval, &val))
             return STAT_ADR;
-        /* only set 1 */
-        if (!set_word_val(s->m, cval, 1)) {
+        word_t tmp = get_reg_val(s->r, hi1);
+        /* write val from reg to mem */
+        if (!set_word_val(s->m, cval, tmp)) {
             if (error_file)
                 fprintf(error_file,
                         "PC = 0x%x, Invalid data address 0x%x\n",
@@ -552,7 +513,7 @@ stat_t step_state(state_ptr s, FILE *error_file)
         }
         set_reg_val(s->r, hi1, val);
         s->pc = ftpc;
-
+    }
 
         break;
 
@@ -721,3 +682,5 @@ stat_t step_state(state_ptr s, FILE *error_file)
     }
     return STAT_AOK;
 }
+
+

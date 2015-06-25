@@ -3,12 +3,19 @@
 #include <cstdlib>
 #include <cstring>
 #include "simulator.h"
-
-
+#include <pthread.h>
 
 Simulator Simulator::sim0, Simulator::sim1;
 Simulator *Simulator::simref[2] = {&Simulator::sim0, &Simulator::sim1};
-int Simulator::ctrlId = 0;
+int Simulator::showCoreId = 0;
+
+int Simulator::print(const char* format ...){
+    va_list arg;
+    va_start( arg, format );
+    vfprintf( output_file, format, arg );
+    va_end( arg );
+    return 0;
+}
 
 void Simulator::tty_sim(){
     int icount = 0;
@@ -23,21 +30,28 @@ void Simulator::tty_sim(){
     if (!object_file) {
          object_file = stdin;
     }
+    if(!output_file)
+        output_file = stdout;
 
-    if (verbosity >= 2)
-        setDumpFile(stdout);
+    if (verbosity >= 2){
+        if(output_file){
+            setDumpFile(output_file);
+        }else{
+            setDumpFile(stdout);
+        }
+    }
+
 
     init();
-    // init_cache(6, 8, mem);
 
 
     /* Emit simulator name */
     if (verbosity >= 2)
-        printf("%s\n", simname);
+        print("%s\n", simname);
 
 
 
-    printf("file: %s\n", this->object_filename);
+    log("objectfile: %s\n", this->object_filename);
     byte_cnt = mem->load(object_file, 1);
     CMARK("finish load mem\n")
 
@@ -46,7 +60,7 @@ void Simulator::tty_sim(){
         fprintf(stderr, "No lines of code found\n");
         exit(1);
     } else if (verbosity >= 2) {
-        printf("%d bytes of code read\n", byte_cnt);
+        log("%d bytes of code read\n", byte_cnt);
     }
     fclose(object_file);
 
@@ -58,16 +72,21 @@ void Simulator::tty_sim(){
     mem0 = copy_mem(mem);
     reg0 = copy_mem(reg);
 
+    if(use_Cache && mem->useCache()){
+        log("tty mode Using Cache\n");
+    }
 
-    icount = run_pipe(instr_limit, 5*instr_limit, &run_status, &result_cc);
+    icount = run_pipe(instr_limit, 5*instr_limit, &run_status, &result_cc, this);
     if (verbosity > 0) {
-        printf("%d instructions executed\n", icount);
-        printf("Status = %s\n", stat_name((stat_t)run_status));
-        printf("Condition Codes: %s\n", cc_name(result_cc));
-        printf("Changed Register State:\n");
-        diff_reg(reg0, reg, stdout);
-        printf("Changed Memory State:\n");
-        diff_mem(mem0, mem, stdout);
+
+
+        print("%d instructions executed\n", icount);
+        print("Status = %s\n", stat_name((stat_t)run_status));
+        print("Condition Codes: %s\n", cc_name(result_cc));
+        print("Changed Register State:\n");
+        diff_reg(reg0, reg, output_file);
+        print("Changed Memory State:\n");
+        diff_mem(mem0, mem, output_file);
     }
     if (do_check) {
         byte_t e = STAT_AOK;
@@ -77,40 +96,40 @@ void Simulator::tty_sim(){
         printf("start stepping\n");
         for (step = 0; step < instr_limit && e == STAT_AOK; step++) {
             e = step_state(isa_state, stdout);
-    }
+        }
 
-    if (diff_reg(isa_state->r, reg, NULL)) {
-        match = FALSE;
-        if (verbosity > 0) {
-        printf("ISA Register != Pipeline Register File\n");
-        diff_reg(isa_state->r, reg, stdout);
+        if (diff_reg(isa_state->r, reg, NULL)) {
+            match = FALSE;
+            if (verbosity > 0) {
+                print("ISA Register != Pipeline Register File\n");
+                diff_reg(isa_state->r, reg, output_file);
+            }
         }
-    }
-    if (diff_mem(isa_state->m, mem, NULL)) {
-        match = FALSE;
-        if (verbosity > 0) {
-        printf("ISA Memory != Pipeline Memory\n");
-        diff_mem(isa_state->m, mem, stdout);
+        if (diff_mem(isa_state->m, mem, NULL)) {
+            match = FALSE;
+            if (verbosity > 0) {
+                print("ISA Memory != Pipeline Memory\n");
+                diff_mem(isa_state->m, mem, output_file);
+            }
         }
-    }
-    if (isa_state->cc != result_cc) {
-        match = FALSE;
-        if (verbosity > 0) {
-        printf("ISA Cond. Codes (%s) != Pipeline Cond. Codes (%s)\n",
-               cc_name(isa_state->cc), cc_name(result_cc));
+        if (isa_state->cc != result_cc) {
+            match = FALSE;
+            if (verbosity > 0) {
+                print("ISA Cond. Codes (%s) != Pipeline Cond. Codes (%s)\n",
+                       cc_name(isa_state->cc), cc_name(result_cc));
+            }
         }
-    }
-    if (match) {
-        printf("ISA Check Succeeds\n");
-    } else {
-        printf("ISA Check Fails\n");
-    }
+        if (match) {
+            print("ISA Check Succeeds\n");
+        } else {
+            print("ISA Check Fails\n");
+        }
     }
 
     /* Emit CPI statistics */
     {
         double cpi = instructions > 0 ? (double) cycles/instructions : 1.0;
-        printf("CPI: %d cycles/%d instructions = %.2f\n",
+        print("CPI: %d cycles/%d instructions = %.2f\n",
            cycles, instructions, cpi);
     }
 
@@ -119,21 +138,81 @@ void Simulator::tty_sim(){
 
 
 Simulator::Simulator(){
-    //init();
+}
+Simulator::~Simulator(){
+    if(output_filename && output_file != stdout){
+        fclose(output_file);
+        output_file = NULL;
+        printf("close output_file: %s\n", output_filename);
+    }
+    if(mem){
+        delete mem;
+        mem = NULL;
+    }
+    if(reg){
+        delete reg;
+        reg = NULL;
+    }
+    if(object_file){
+        fclose(object_file);
+    }
+    if(post_load_mem){
+        printf("delete post load mem\n");
+        delete post_load_mem;
+        post_load_mem = NULL;
+    }
+}
+
+void Simulator::config(sim_config &conf){
+    instr_limit = conf.instr_limit;
+    verbosity = conf.verbosity;
+    do_check = conf.do_check;
+    gui_mode = conf.use_Gui;
+    use_Cache = conf.use_Cache;
+    object_filename = conf.input_filename;
+    if(object_filename){
+        object_file = fopen(object_filename,"r");
+        if(!object_file){
+            printf("open input_file err!");
+            //exit(1);
+        }
+    }
+    if(conf.output_filename){
+        output_filename = conf.output_filename;
+        // may need to check previous output_file
+        output_file = fopen(output_filename, "w+");
+        if(!output_file){
+            printf("open output_file err, set to stdout\n");
+            output_file = stdout;
+        }
+    }
+
+}
+
+void *Simulator::simfunc0(void *arg){
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    int id = (long)arg;
+    printf("I am simfunc0 running at simulator %d\n", id);
+    if(id == 0){
+        sim0.tty_sim();
+    }else{
+        sim1.tty_sim();
+    }
+
+    pthread_exit((void*)0);
 }
 
 void Simulator::init(){
     initialized = 1;
-    mem = init_mem(MEM_SIZE);
-    reg = init_reg();
-
+    mem = new MemRec(MEM_SIZE);
+    reg = new RegRec();
 
     /* create 5 pipe registers */
-    pc_state     = new_pipe(sizeof(pc_ele), (void *) &bubble_pc);
-    if_id_state  = new_pipe(sizeof(if_id_ele), (void *) &bubble_if_id);
-    id_ex_state  = new_pipe(sizeof(id_ex_ele), (void *) &bubble_id_ex);
-    ex_mem_state = new_pipe(sizeof(ex_mem_ele), (void *) &bubble_ex_mem);
-    mem_wb_state = new_pipe(sizeof(mem_wb_ele), (void *) &bubble_mem_wb);
+    pc_state     = pip[0];
+    if_id_state  = pip[1];
+    id_ex_state  = pip[2];
+    ex_mem_state = pip[3];
+    mem_wb_state = pip[4];
 
     /* connect them to the pipeline stages */
     pc_next   = (pc_ptr)pc_state->next;
@@ -152,15 +231,15 @@ void Simulator::init(){
     mem_wb_curr = (mem_wb_ptr)mem_wb_state->current;
 
     reset();
-    clear_mem(mem);
+    mem->clear();
 
 }
 
 void Simulator::reset(){
     if (!initialized)
         init();
-    clear_pipes();
-    clear_mem(reg);
+    pip.clear();
+    reg->clear();
     minAddr = 0;
     memCnt = 0;
     starting_up = 1;
@@ -171,9 +250,9 @@ void Simulator::reset(){
 
 #ifdef HAS_GUI
     if (gui_mode) {
-    signal_register_clear();
+        signal_register_clear();
 
-    create_memory_display();//(minAddr, memCnt);
+        create_memory_display(minAddr, memCnt);
     }
 #endif
 
@@ -193,6 +272,7 @@ void Simulator::reset(){
 }
 
 void Simulator::setName(char *name){
+    strcpy(simname, name);
 
 }
 
@@ -219,7 +299,7 @@ void Simulator::report(int cyc){
         /* signal_sources(); */
         show_cc(cc);
         show_stat(status);
-        show_cpi();
+        show_cpi(instructions, cycles);
 
 #endif
 
@@ -270,7 +350,7 @@ byte_t Simulator::step_pipe(int max_instr, int ccount){
     update_state(update_mem, update_cc);
 
     /* Update pipe registers */
-    update_pipes();
+    pip.update();
 
     report(ccount);
 
@@ -336,9 +416,6 @@ void Simulator::update_state(bool_t update_mem, bool_t update_cc)
        Order of two writes determines semantics of
        popl %esp.  According to ISA, %esp will get popped value
     */
-
-
-
     if (wb_destE != REG_NONE) {
         log("\tWriteback: Wrote 0x%x to register %s\n",
         wb_valE, reg_name(wb_destE));
@@ -346,15 +423,15 @@ void Simulator::update_state(bool_t update_mem, bool_t update_cc)
 
     }
     if (wb_destM != REG_NONE) {
-    log("\tWriteback: Wrote 0x%x to register %s\n",
-        wb_valM, reg_name(wb_destM));
-    set_reg_val(reg, wb_destM, wb_valM);
+        log("\tWriteback: Wrote 0x%x to register %s\n",
+            wb_valM, reg_name(wb_destM));
+        set_reg_val(reg, wb_destM, wb_valM);
     }
 
 
     /* Memory write */
     if (mem_write && !update_mem) {
-    log("\tDisabled write of 0x%x to address 0x%x\n", mem_data, mem_addr);
+        log("\tDisabled write of 0x%x to address 0x%x\n", mem_data, mem_addr);
     }
 
     if (update_mem && mem_write) {
@@ -374,12 +451,14 @@ void Simulator::update_state(bool_t update_mem, bool_t update_cc)
             word_t align_addr = mem_addr & ~0x3;
             word_t val;
             get_word_val(mem, align_addr, &val);
-            set_memory(align_addr, val);
+
+            set_memory(align_addr, val, this);
             align_addr+=4;
             get_word_val(mem, align_addr, &val);
-            set_memory(align_addr, val);
+
+            set_memory(align_addr, val, this);
         } else {
-            set_memory(mem_addr, mem_data);
+            set_memory(mem_addr, mem_data, this);
         }
 
 #endif
@@ -388,85 +467,12 @@ void Simulator::update_state(bool_t update_mem, bool_t update_cc)
         }
     }
     if (update_cc)
-    cc = cc_in;
+        cc = cc_in;
 }
 
 
-int Simulator::run_pipe(int max_instr, int max_cycle, byte_t *statusp, cc_t *ccp){
 
-    int icount = 0;
-    int ccount = 0;
-    byte_t run_status = STAT_AOK;
-    while (icount < max_instr && ccount < max_cycle) {
-        run_status = step_pipe(max_instr-icount, ccount);
-    if (run_status != STAT_BUB)
-        icount++;
-    if (run_status != STAT_AOK && run_status != STAT_BUB)
-        break;
-    ccount++;
-    }
-    if (statusp)
-        *statusp = run_status;
-    if (ccp)
-        *ccp = cc;
-    return icount;
 
-}
-
-void Simulator::clear_pipes(){
-    int s;
-    for (s = 0; s < pipe_count; s++) {
-      pipe_ptr p = pipes[s];
-      memcpy(p->current, p->bubble_val, p->count);
-      memcpy(p->next, p->bubble_val, p->count);
-      p->op = P_LOAD;
-    }
-
-}
-pipe_ptr Simulator::new_pipe(int count, void *bubble_val)
-{
-  pipe_ptr result = (pipe_ptr) malloc(sizeof(pipe_ele));
-  result->current = malloc(count);
-  result->next = malloc(count);
-  memcpy(result->current, bubble_val, count);
-  memcpy(result->next, bubble_val, count);
-  result->count = count;
-  result->op = P_LOAD;
-  result->bubble_val = bubble_val;
-  pipes[pipe_count++] = result;
-  return result;
-}
-
-void Simulator::update_pipes(){
-
-    int s;
-    for (s = 0; s < pipe_count; s++) {
-      pipe_ptr p = pipes[s];
-      switch (p->op)
-        {
-        case P_BUBBLE:
-          /* insert a bubble into the next stage */
-          memcpy(p->current, p->bubble_val, p->count);
-          break;
-
-        case P_LOAD:
-          /* copy calculated state from previous stage */
-          memcpy(p->current, p->next, p->count);
-          break;
-        case P_ERROR:
-        /* Like a bubble, but insert error condition */
-          memcpy(p->current, p->bubble_val, p->count);
-          break;
-        case P_STALL:
-        default:
-          /* do nothing: next stage gets same instr again */
-          ;
-        }
-      if (p->op != P_ERROR)
-      p->op = P_LOAD;
-    }
-
-}
 
 
 /* bubble stage (has effect at next update) */
@@ -496,14 +502,6 @@ void Simulator::stall_stage(stage_id_t stage) {
 
 
 /*************** Stage Implementations *****************/
-
-
-
-
-
-
-
-
 
 void Simulator::do_if_stage()
 {
@@ -544,8 +542,8 @@ void Simulator::do_if_stage()
     if_id_next->ra = HI4(regids);
     if_id_next->rb = LO4(regids);
     if (gen_need_valC()) {
-    get_word_val(mem, valp, &valc);
-    valp+= 4;
+        get_word_val(mem, valp, &valc);
+        valp+= 4;
     }
     if_id_next->valp = valp;
     if_id_next->valc = valc;
@@ -675,19 +673,6 @@ void Simulator::do_mem_stage()
 
 
 
-p_stat_t Simulator::pipe_cntl(char *name, int stall, int bubble)
-{
-    if (stall) {
-    if (bubble) {
-            log("%s: Conflicting control signals for pipe register\n",
-            name);
-        return P_ERROR;
-    } else
-        return P_STALL;
-    } else {
-    return bubble ? P_BUBBLE : P_LOAD;
-    }
-}
 
 
 void Simulator::do_stall_check()
@@ -1005,6 +990,174 @@ int Simulator::gen_W_bubble()
 {
     return 0;
 }
+
+
+#ifdef HAS_GUI
+
+
+
+/******************************************************************************
+ *	tcl command definitions
+ ******************************************************************************/
+
+/* Implement command versions of the simulation functions */
+int Simulator::simResetCmd(ClientData clientData, Tcl_Interp *interp,
+        int argc, char *argv[])
+{
+
+    Simulator *s = simref[showCoreId];
+    sim_interp = interp;
+    if (argc != 1) {
+    interp->result = "No arguments allowed";
+    return TCL_ERROR;
+    }
+    s->reset();
+    if (s->post_load_mem) {
+        free_mem(s->mem);
+        s->mem = copy_mem(s->post_load_mem);
+    }
+    interp->result = stat_name(STAT_AOK);
+    return TCL_OK;
+}
+
+int Simulator::simLoadCodeCmd(ClientData clientData, Tcl_Interp *interp,
+           int argc, char *argv[])
+{
+    Simulator *s = simref[showCoreId];
+    FILE *code_file;
+    int code_count;
+    sim_interp = interp;
+    if (argc != 2) {
+        interp->result = "One argument required";
+        return TCL_ERROR;
+    }
+
+    code_file = fopen(argv[1], "r");
+
+    if (!code_file) {
+        sprintf(tcl_msg, "Couldn't open code file '%s'", argv[1]);
+        interp->result = tcl_msg;
+        return TCL_ERROR;
+    }
+    s->reset();
+
+
+    ((RegRec*)s->reg)->setReporter((void*)&signal_register_update);
+    s->mem->setReporter((void*)&report_line);//set before loading code
+    code_count = s->mem->load(code_file, 0);
+    if(s->post_load_mem){
+        delete (s->post_load_mem);
+    }
+    s->post_load_mem = new MemRec (*(s->mem));
+
+    sprintf(tcl_msg, "%d", code_count);
+    interp->result = tcl_msg;
+    CMARK("finish load code\n")
+    if(s->use_Cache && s->mem->useCache())
+          printf("gui mode using cache");
+    fclose(code_file);
+
+    return TCL_OK;
+}
+
+int Simulator::simLoadDataCmd(ClientData clientData, Tcl_Interp *interp,
+           int argc, char *argv[])
+{
+    Simulator *s = simref[showCoreId];
+
+    FILE *data_file;
+    int word_count = 0;
+    interp->result = "Not implemented";
+    return TCL_ERROR;
+
+
+    sim_interp = interp;
+    if (argc != 2) {
+        interp->result = "One argument required";
+        return TCL_ERROR;
+    }
+    data_file = fopen(argv[1], "r");
+    if (!data_file) {
+        sprintf(tcl_msg, "Couldn't open data file '%s'", argv[1]);
+        interp->result = tcl_msg;
+        return TCL_ERROR;
+    }
+    sprintf(tcl_msg, "%d", word_count);
+    interp->result = tcl_msg;
+    fclose(data_file);
+    return TCL_OK;
+}
+
+
+int Simulator::simRunCmd(ClientData clientData, Tcl_Interp *interp,
+          int argc, char *argv[])
+{
+    Simulator *s = simref[showCoreId];
+    int cycle_limit = 1;
+    byte_t status;
+    cc_t cc;
+    sim_interp = interp;
+
+    if (argc > 2) {
+        interp->result = "At most one argument allowed";
+        return TCL_ERROR;
+    }
+    if (argc >= 2 &&
+            (sscanf(argv[1], "%d", &cycle_limit) != 1 ||
+             cycle_limit < 0)) {
+        sprintf(tcl_msg, "Cannot run for '%s' cycles!", argv[1]);
+        interp->result = tcl_msg;
+        return TCL_ERROR;
+    }
+
+    CMARK("run pipe\n")
+
+    run_pipe(cycle_limit + 5, cycle_limit, &status, &cc, s);
+    interp->result = stat_name((stat_t)status);
+    return TCL_OK;
+}
+
+int Simulator::simModeCmd(ClientData clientData, Tcl_Interp *interp,
+           int argc, char *argv[])
+{
+    Simulator *s = simref[showCoreId];
+    sim_interp = interp;
+
+    if (argc != 2) {
+        interp->result = "One argument required";
+        return TCL_ERROR;
+    }
+    interp->result = argv[1];
+    if (strcmp(argv[1], "wedged") == 0)
+        s->sim_mode = S_WEDGED;
+    else if (strcmp(argv[1], "stall") == 0)
+        s->sim_mode = S_STALL;
+    else if (strcmp(argv[1], "forward") == 0)
+        s->sim_mode = S_FORWARD;
+    else {
+        sprintf(tcl_msg, "Unknown mode '%s'", argv[1]);
+        interp->result = tcl_msg;
+        return TCL_ERROR;
+    }
+    return TCL_OK;
+}
+
+
+
+
+
+
+
+
+
+
+#endif
+
+
+
+
+
+
 
 
 

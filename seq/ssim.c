@@ -213,6 +213,8 @@ static void run_tty_sim()
     /* Emit simulator name */
     printf("%s\n", simname);
 
+    mem->setReporter((void*)report_line);
+    ((RegRec*)reg)->setReporter((void*)signal_register_update);
     byte_cnt = load_mem(mem, object_file, 1);
     if (byte_cnt == 0) {
 	fprintf(stderr, "No lines of code found\n");

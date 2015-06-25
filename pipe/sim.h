@@ -4,22 +4,12 @@
 #include "isa.h"
 #include "pipeline.h"
 #include "stages.h"
-#include "utils.h"
 
+#ifndef HAS_GUI
+#define HAS_GUI
+#endif
 
 #define CMARK(msg) printf(msg);
-
-/********** Typedefs ************/
-
-/* EX stage mux settings */
-typedef enum { MUX_NONE, MUX_EX_A, MUX_EX_B, MUX_MEM_E,
-	       MUX_WB_M, MUX_WB_E } mux_source_t;
-
-/* Simulator operating modes */
-typedef enum { S_WEDGED, S_STALL, S_FORWARD } sim_mode_t;
-
-/* Pipeline stage identifiers for stage operation control */
-typedef enum { IF_STAGE, ID_STAGE, EX_STAGE, MEM_STAGE, WB_STAGE } stage_id_t;
 
 /********** Defines **************/
 
@@ -28,6 +18,28 @@ typedef enum { IF_STAGE, ID_STAGE, EX_STAGE, MEM_STAGE, WB_STAGE } stage_id_t;
 
 /* Get rb out of one byte regid field */
 #define GET_RB(r) LO4(r)
+
+#define DEFAULT_VERBOSITY 2
+#define DEFAULT_INSTR_LIMIT 10000
+#define MAXBUF 1024
+#define DEFAULTNAME "Y86 Simulator: "
+#define MAXARGS 128
+#define MAXBUF 1024
+#define TKARGS 3
+
+
+
+/********** Typedefs ************/
+
+/* EX stage mux settings */
+typedef enum { MUX_NONE, MUX_EX_A, MUX_EX_B, MUX_MEM_E,
+           MUX_WB_M, MUX_WB_E } mux_source_t;
+
+/* Simulator operating modes */
+typedef enum { S_WEDGED, S_STALL, S_FORWARD } sim_mode_t;
+
+/* Pipeline stage identifiers for stage operation control */
+typedef enum { IF_STAGE, ID_STAGE, EX_STAGE, MEM_STAGE, WB_STAGE } stage_id_t;
 
 
 /************ Global state declaration ****************/
@@ -38,10 +50,6 @@ void report_pc(unsigned fpc, unsigned char fpcv,
            unsigned wpc, unsigned char wpcv);
 
 void report_state(char *id, int current, char *txt);
-
-/*************** Bubbled version of stages *************/
-
-
 
 
 
@@ -64,12 +72,12 @@ extern cc_t cc;
 extern stat_t stat;
 
 
-
-
-
-
 /* Operand sources in EX (to show forwarding) */
 extern mux_source_t amux, bmux;
+
+
+/*************** Bubbled version of stages *************/
+
 
 /* Provide global access to current states of all pipeline registers */
 #ifdef __cpluscplus
@@ -116,16 +124,33 @@ extern word_t e_valb;
 extern bool_t e_bcond;
 extern bool_t dmem_error;
 
+extern Pipes pip;
+
+
 /* Simulator operating mode */
 extern sim_mode_t sim_mode;
 /* Log file */
 extern FILE *dumpfile;
 
+struct sim_config{
+    int use_Gui = FALSE;    /* Run in GUI mode instead of TTY mode? (-g) */
+    bool_t use_Class = FALSE;
+    bool_t use_Cache = FALSE;
+    char *input_filename = NULL;   /* The input object file name. */
+    FILE *object_file;       /* Input file handle */
+    char *output_filename = NULL;
+    char *output_filename2 = NULL;
+    int verbosity = DEFAULT_VERBOSITY;    /* Verbosity level [TTY only] (-v) */
+    int instr_limit = DEFAULT_INSTR_LIMIT; /* Instruction limit [TTY only] (-l) */
+    bool_t do_check = FALSE; /* Test with ISA simulator? [TTY only] (-t) */
 
+    bool_t dual = FALSE;
+};
+
+void run_tty_sim(sim_config conf);
 /* main */
-//void usage(char *name); /* Print helpful usage message */
 int sim_main(int argc, char *argv[]);
-//void run_tty_sim();               /* Run simulator in TTY mode */
+
 /* Simulator name defined and initialized by the compiled HCL file */
 /* according to the -n argument supplied to hcl2c */
 extern  char simname[];
@@ -133,22 +158,12 @@ extern  char simname[];
 /* Parameters modifed by the command line */
 extern int gui_mode;    /* Run in GUI mode instead of TTY mode? (-g) */
 extern bool Use_Class;
+extern bool Use_Cache;
 
-#define MAXBUF 1024
-#define DEFAULTNAME "Y86 Simulator: "
-
-#define MAXARGS 128
-#define MAXBUF 1024
-#define TKARGS 3
-
-#define MAX_STAGE 10
 
 /* End main */
 
 /*************** Simulation Control Functions ***********/
-
-
-
 
 
 
@@ -177,7 +192,8 @@ void sim_reset();
   if statusp nonnull, then will be set to status of final instruction
   if ccp nonnull, then will be set to condition codes of final instruction
 */
-int sim_run_pipe(int max_instr, int max_cycle, byte_t *statusp, cc_t *ccp);
+
+byte_t sim_step_pipe(int max_instr, int ccount);
 
 /* If dumpfile set nonNULL, lots of status info printed out */
 void sim_set_dumpfile(FILE *file);
@@ -188,12 +204,23 @@ void sim_set_dumpfile(FILE *file);
  */
 void sim_log( const char *format, ... );
 
+
+p_stat_t pipe_cntl(char *name, int stall, int bubble);
+
+
  
 /******************* GUI Interface Functions **********************/
 #ifdef HAS_GUI
 #include <tk.h>
 #endif
 
+/* utils */
+/* Print hex/oct/binary format with leading zeros */
+/* bpd denotes bits per digit  Should be in range 1-4,
+   bpw denotes bits per word.*/
+
+void wprint(unsigned x, int bpd, int bpw, FILE *fp);
+void wstring(unsigned x, int bpd, int bpw, char *str);
 char *format_pc(pc_ptr state);
 char *format_if_id(if_id_ptr state);
 char *format_id_ex(id_ex_ptr state);
@@ -203,25 +230,64 @@ char *format_mem_wb(mem_wb_ptr state);
 //#define HAS_GUI
 
 
+#ifdef HAS_GUI
 extern char tcl_msg[256];
-
 /* Keep track of the TCL Interpreter */
 extern Tcl_Interp *sim_interp;
-
 extern mem_t post_load_mem;
 
+void report_line(int line_no, int addr, char *hexcode, char *line);
+void signal_register_update(int r, int val);
 
-void signal_sources();
+#endif
+
+
+/* only access local vars */
+void signal_sources(mux_source_t a, mux_source_t b);
 void signal_register_clear();
-
-
-void show_cc(cc_t cc);
-void show_cpi();
+void show_cc(cc_t scc);
 void show_stat(stat_t stat);
+void show_cpi(int instr, int cyc);
 
-void create_memory_display();
-void set_memory(int addr, int val);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+#ifdef HAS_GUI
+
+/******************************************************************************
+ *	function declarations
+ ******************************************************************************/
+
+int simResetCmd(ClientData clientData, Tcl_Interp *interp,
+        int argc, char *argv[]);
+
+int simLoadCodeCmd(ClientData clientData, Tcl_Interp *interp,
+           int argc, char *argv[]);
+
+int simLoadDataCmd(ClientData clientData, Tcl_Interp *interp,
+           int argc, char *argv[]);
+
+int simRunCmd(ClientData clientData, Tcl_Interp *interp,
+          int argc, char *argv[]);
+
+int simModeCmd(ClientData clientData, Tcl_Interp *interp,
+           int argc, char *argv[]);
+
+void addAppCommands(Tcl_Interp *interp);
+
+
+#endif
 
 
 								       

@@ -11,11 +11,7 @@
  *	#includes
  ******************************************************************************/
 
-#include <stdio.h>
-
-/******************************************************************************
- *	typedefs
- ******************************************************************************/
+#include <cstdio>
 
 /* Different control operations for pipeline register */
 /* LOAD:   Copy next state to current   */
@@ -23,9 +19,24 @@
 /* BUBBLE: Set current state to nop     */
 /* ERROR:  Occurs when both stall & load signals set */
 
-typedef enum { P_LOAD, P_STALL, P_BUBBLE, P_ERROR } p_stat_t;
+#define MAX_STAGE 10
 
-typedef struct {
+/******************************************************************************
+ *	typedefs
+ ******************************************************************************/
+
+typedef enum { P_LOAD, P_STALL, P_BUBBLE, P_ERROR } p_stat_t;
+// forward declaration
+class Pipes;
+
+class PipeRec{
+public:
+    PipeRec(int c, void *bv);
+    ~PipeRec();
+
+    void clear();
+    void update();
+
     /* Current and next register state */
     void *current;
     void *next;
@@ -35,31 +46,34 @@ typedef struct {
     int count;
     /* How should state be updated next time? */
     p_stat_t op;
-} pipe_ele, *pipe_ptr;
 
-/******************************************************************************
- *	function declarations
- ******************************************************************************/
+    friend class Pipes;
 
+private:
+    static PipeRec* pipes[MAX_STAGE];
+    static int pipe_count;
+
+};
+typedef PipeRec pipe_ele;
+typedef PipeRec* pipe_ptr;
+
+class Pipes{
+public:
+    int count;
+    pipe_ptr pipes[MAX_STAGE];
+
+    Pipes();
+    ~Pipes();
 /* Create new pipe with count bytes of state */
 /* bubble_val indicates state corresponding to pipeline bubble */
-pipe_ptr new_pipe(int count, void *bubble_val);
-
+    pipe_ptr add(int c, void *bubble_val);
 /* Update all pipes */
-void update_pipes();
-
+    void update();
 /* Set all pipes to bubble values */
-void clear_pipes();
+    void clear();
+    pipe_ptr& operator[](int i);
 
-/* Utility code */
-
-/* Print hex/oct/binary format with leading zeros */
-/* bpd denotes bits per digit  Should be in range 1-4,
-   bpw denotes bits per word.*/
-void wprint(unsigned x, int bpd, int bpw, FILE *fp);
-void wstring(unsigned x, int bpd, int bpw, char *s);
-
-/******************************************************************************/
+};
 
 #endif /* PIPE_H */
 

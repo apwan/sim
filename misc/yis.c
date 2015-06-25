@@ -5,9 +5,6 @@
 
 #include "isa.h"
 
-/* YIS never runs in GUI mode */
-int gui_mode = 0;
-
 void usage(char *pname)
 {
     printf("Usage: %s code_file [max_steps]\n", pname);
@@ -41,11 +38,19 @@ int main(int argc, char *argv[])
 
     savem = copy_mem(s->m);
 
-    if (argc > 2)
+    if (argc > 2){
         max_steps = atoi(argv[2]);
+        s->m->useCache(); /* test cache */
+    }
 
-    for (step = 0; step < max_steps && e == STAT_AOK; step++)
+
+
+    /* run */
+    for (step = 0; step < max_steps && e == STAT_AOK; step++){
+        printf("step %d\n", step);
         e = step_state(s, stdout);
+
+    }
 
     printf("Stopped in %d steps at PC = 0x%x.  Status '%s', CC %s\n",
            step, s->pc, stat_name(e), cc_name(s->cc));
@@ -57,8 +62,11 @@ int main(int argc, char *argv[])
     diff_mem(savem, s->m, stdout);
 
     free_state(s);
+    printf("state released\n");
     free_reg(saver);
+    printf("saver released\n");
     free_mem(savem);
+    printf("savem released\n");
 
     return 0;
 }

@@ -4,19 +4,27 @@
 #include "utils.h"
 #include <cstdio>
 
+#ifndef HAS_GUI
+#define HAS_GUI
+#endif
+
+
 #ifdef HAS_GUI
 #include <tk.h>
 #endif
-#include <tk.h>
+
 
 class Simulator{
 public:
     Simulator();
-    ~Simulator(){}
+    ~Simulator();
+    void config(sim_config &conf);
 
     static Simulator sim0, sim1;
     static Simulator *simref[2];
-
+    static int showCoreId;
+    static void *simfunc0(void *arg);
+    void *simfunc1(void *arg);
 
 
     void init();
@@ -24,24 +32,26 @@ public:
     void setName(char *name);
     void setDumpFile(FILE *file);
     void log(const char *format, ...);
+    int print(const char* ...);
     void report(int cyc);
+
+    void tty_sim();
+
+
+    Pipes pip;
     byte_t step_pipe(int max_instr, int ccount);
-    int run_pipe(int max_instr, int max_cycle, byte_t *statusp, cc_t *ccp);
-    void update_pipes();
-    void clear_pipes();
-    pipe_ptr new_pipe(int count, void *bubble_val);
+
     void update_state(bool_t update_mem, bool_t update_cc);
     /* bubble stage (has effect at next update) */
     void bubble_stage(stage_id_t stage);
     /* stall stage (has effect at next update) */
     void stall_stage(stage_id_t stage);
 
-
     void do_if_stage();
     void do_id_wb_stages();
     void do_ex_stage();
     void do_mem_stage();
-    p_stat_t pipe_cntl(char *name, int stall, int bubble);
+
     void do_stall_check();
 
 
@@ -94,43 +104,29 @@ public:
     int gen_W_bubble();
 
 
-
-
-
-    void tty_sim();
-
     /* previous global */
     char simname[50] = "Y86 Processor: pipe-full.hcl";
     int gui_mode = FALSE;    /* Run in GUI mode instead of TTY mode? (-g) */
+    bool use_Cache = FALSE;
     char *object_filename;   /* The input object file name. */
     FILE *object_file;       /* Input file handle */
+    char *output_filename = NULL;
+    FILE *output_file = stdout;    // default set to stdout;
     int verbosity = 2;    /* Verbosity level [TTY only] (-v) */
     int instr_limit = 10000; /* Instruction limit [TTY only] (-l) */
     bool_t do_check = FALSE; /* Test with ISA simulator? [TTY only] (-t) */
 
 
-    /* gui */
+    /* Simulator operating mode */
+    sim_mode_t sim_mode = S_FORWARD;
+    /* Log file */
+    FILE *dumpfile = NULL;
 
 
-    char tcl_msg[256];
-    /* Keep track of the TCL Interpreter */
-    Tcl_Interp *sim_interp = NULL;
 
-    mem_t post_load_mem;
-
-
-    static int ctrlId;
 #ifdef HAS_GUI
-    void signal_register_update(int r, word_t val);
-    void create_memory_display();
-    void set_memory(int addr, int val);
-    void show_cc(cc_t cc);
-    void show_stat(stat_t stat);
-    static char *rname[];
-    void show_cpi();
-    void signal_sources();
-    void signal_register_clear();
-    void report_line(int line_no, int addr, char *hex, char *text);
+/* gui */
+
 
 
 
@@ -149,17 +145,11 @@ public:
     static int simModeCmd(ClientData clientData, Tcl_Interp *interp,
                int argc, char *argv[]);
 
-    static void addAppCommands(Tcl_Interp *interp);
-    static int Tcl_AppInit(Tcl_Interp *interp);
 
 #endif
 
     /* data */
     int initialized = 0;
-
-    pipe_ptr pipes[MAX_STAGE];
-    int pipe_count = 0;
-
     /* Has simulator gotten past initial bubbles? */
     int starting_up = 1;
     /* How many cycles have been simulated? */
@@ -167,6 +157,8 @@ public:
     /* How many instructions have passed through the WB stage? */
     int instructions = 0;
     /* Both instruction and data memory */
+
+    mem_t post_load_mem = NULL;
     mem_t mem;
     int minAddr = 0;
     int memCnt = 0;
@@ -219,44 +211,17 @@ public:
     bool_t e_bcond;
     bool_t dmem_error;
 
-    /* Bubble version */
-    /*
-    pc_ele bubble_pc = {0,STAT_AOK};
-    if_id_ele bubble_if_id = { I_NOP, 0, REG_NONE,REG_NONE,
-                   0, 0, STAT_BUB, 0};
-    id_ex_ele bubble_id_ex = { I_NOP, 0, 0, 0, 0,
-                   REG_NONE, REG_NONE, REG_NONE, REG_NONE,
-                   STAT_BUB, 0};
-
-    ex_mem_ele bubble_ex_mem = { I_NOP, 0, FALSE, 0, 0,
-                     REG_NONE, REG_NONE, STAT_BUB, (stat_t)0};
-
-    mem_wb_ele bubble_mem_wb = { I_NOP, 0, 0, 0, REG_NONE, REG_NONE,
-                     STAT_BUB, 0};
-    */
-
     /* The pipeline state */
-    /* C++ compatible */
     pipe_ptr pc_state, if_id_state, id_ex_state, ex_mem_state, mem_wb_state;
-
-    /* Simulator operating mode */
-    sim_mode_t sim_mode = S_FORWARD;
-    /* Log file */
-    FILE *dumpfile = NULL;
-
-    /* report */
-    void report_pc(unsigned fpc, unsigned char fpcv,
-               unsigned dpc, unsigned char dpcv,
-               unsigned epc, unsigned char epcv,
-               unsigned mpc, unsigned char mpcv,
-               unsigned wpc, unsigned char wpcv);
-
-    void report_state(char *id, int current, char *txt);
 
 
 
 };
 
+int run_pipe(int max_instr, int max_cycle, byte_t *statusp, cc_t *ccp, Simulator *s = NULL);
+/* need to access glocal vars */
+void create_memory_display(int nminAddr, int nmemCnt, Simulator *s = NULL);
+void set_memory(int addr, int val, Simulator *s = NULL);
 
 
 

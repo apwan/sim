@@ -177,13 +177,13 @@ pack .r.lab -in .r -side top
 # pack .r.labreg .r.regid .r.labval .r.regval .r.doset .r.c  -in .r.cntl -side left
 
 set regnames [list "%eax" "%ecx" "%edx" "%ebx" "%esp" "%ebp" "%esi" "%edi"]
-set reg_display_width 8
+
 # Create Row of Register Labels
 frame .r.labels
 pack .r.labels -side top -in .r
 
 for {set i 0} {$i < 8} {incr i 1} {
-    label .r.lab$i -width $reg_display_width -font $dpyFont -text [lindex $regnames $i]
+    label .r.lab$i -width 8 -font $dpyFont -text [lindex $regnames $i]
     pack .r.lab$i -in .r.labels -side left
 }
 
@@ -194,7 +194,7 @@ pack .r.row -side top -in .r
 
 # Create 8 registers
 for {set i 0} {$i < 8} {incr i 1} {
-    label .r.reg$i -width $reg_display_width -font $dpyFont -relief ridge \
+    label .r.reg$i -width 8 -font $dpyFont -relief ridge \
 	    -bg $normalBg
     pack .r.reg$i -in .r.row -side left
 }
@@ -241,11 +241,11 @@ frame .md
 
 # simDelay defines number of milliseconds for each cycle of simulator
 # Initial value is 1000ms
-set simDelay 1000
+set simDelay 800
 # Set delay based on rate expressed in log(Hz)
 proc setSpeed {rate} {
   global simDelay
-  set simDelay [expr round(1000 / pow(10,$rate/10.0))]
+  set simDelay [expr round(800 / pow(10,$rate/10.0))]
 }
 
 # Global variables controlling simulator execution
@@ -287,8 +287,8 @@ set valaBg LightPink
 set valbBg PaleGreen1
 
 # Overall width of pipe register display
-set pipeWidth 55
-set pipeHeight 2
+set pipeWidth 45
+set pipeHeight 1
 set labWidth 5
 
 # Add labeled display to window 
@@ -460,13 +460,14 @@ proc showSources { a b } {
 ##########################################################################
 
 toplevel .c
-wm title .c "Program Code"
+wm title .c "Dual Core Experiment: Program Code"
 frame .c.cntl 
 pack .c.cntl -in .c -side top -anchor w
 label .c.filelab -width 10 -text "File"
 entry .c.filename -width 20 -relief sunken -textvariable codeFile \
 	-font $dpyFont -bg white
 button .c.loadbutton -width $cntlBW -command {loadCode $codeFile} -text Load
+button .c.modebutton -width $cntlBW -text Mode
 pack .c.filelab .c.filename .c.loadbutton -in .c.cntl -side left
 
 proc clearCode {} {
@@ -544,10 +545,27 @@ proc simResetAll {} {
 ###############################################################################
 #    Memory Display                                                           #
 ###############################################################################
-toplevel .m
-wm title .m "Memory Contents"
+frame .cc1 
+pack .cc1 -in . -side left
+label .cc1.lab -text "Core 1 Cache Contents"  -font $bigLabFont -height $sectionHeight
+pack .cc1.lab -in .cc1 -side top
+
+frame .cc1.t
+pack .cc1.t -in .cc1 -side top -anchor w
+
+label .cc1.t.lab -width 6 -font $dpyFont -text "      "
+pack .cc1.t.lab -in .cc1.t -side left
+for {set i 0} {$i < 16} {incr i 4} {
+    label .cc1.t.a$i -width 8 -font $dpyFont -text [format "  0x---%x" [expr $i % 16]]
+    pack .cc1.t.a$i -in .cc1.t -side left
+}
+
+frame .m
+pack .m -in . -side top
+#wm title .m "Memory Contents"
+label .m.lab -text "Memory Contents" -font $bigLabFont -height $sectionHeight
 frame .m.t
-pack .m.t -in .m -side top -anchor w
+pack .m.lab .m.t -in .m -side top -anchor w
 
 label .m.t.lab -width 6 -font $dpyFont -text "      "
 pack .m.t.lab -in .m.t -side left
@@ -555,6 +573,10 @@ for {set i 0} {$i < 16} {incr i 4} {
     label .m.t.a$i -width 8 -font $dpyFont -text [format "  0x---%x" [expr $i % 16]]
     pack .m.t.a$i -in .m.t -side left
 }
+# add cache proc
+
+
+
 
 
 # Keep track of range of addresses currently displayed
@@ -596,7 +618,7 @@ proc setMem {Addr Val} {
     if {$Addr < $minAddr || $Addr > [expr $minAddr + $memCnt]} {
 	error "Memory address $Addr out of range"
     }
-    .m.e.v$Addr config -text [format %8x $Val]
+    .m.e.v$Addr config -text [format %.8x $Val]
 }
 
 proc clearMem {} {

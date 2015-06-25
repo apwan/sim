@@ -1,0 +1,26 @@
+# Execution begins at address 0
+	.pos 0
+  irmovl 0x1000, %eax
+  irmovl 0x1, %edx
+  nop
+  nop
+
+  irmovl 0x12345678, %ebx
+  rmmovl %ebx, 4(%eax)
+Start:  rmswap %edx, (%eax)
+  andl   %edx, %edx
+  jne    End
+  irmovl $4, %ebx
+  rmmovl %ebx, 4(%eax)
+  iaddl  $4, %edx
+  xorl   %ebx, %ebx
+  rmmovl %ebx, (%eax)
+  rmswap %edx, (%eax)
+  andl   %edx, %edx
+  je     Start
+  nop
+  nop
+End:    iaddl $-1, %edx
+        nop
+        nop
+        halt

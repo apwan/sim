@@ -16,9 +16,8 @@ HEADERS += misc/isa.h \
            pipe/sim.h \
            pipe/stages.h \
            seq/sim.h \
-    pipe/utils.h \
     pipe/simulator.h \
-    pipe/psim_gui.hpp
+    misc/bus.h
 YACCSOURCES += misc/hcl.y
 SOURCES += misc/examples.c \
            misc/isa.c \
@@ -37,4 +36,6 @@ SOURCES += misc/examples.c \
     misc/mem.c
 
 DISTFILES += \
-    pipe/pipe.tcl
+    pipe/pipe.tcl \
+    y86-code/asum.ys \
+    y86-code/rmswap.ys

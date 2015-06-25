@@ -92,9 +92,7 @@ void sim_log( const char *format, ... );
 
 /******************* GUI Interface Functions **********************/
 #ifdef HAS_GUI
-#ifdef __cplusplus
-extern "C"{
-#endif
+CPPBEGIN
 
 void signal_register_clear();
 
@@ -107,8 +105,10 @@ void show_cc(cc_t cc);
 void create_memory_display();
 void set_memory(int addr, int val);
 
-#ifdef __cplusplus
-}
+void report_line(int line_no, int addr, char *hexcode, char *line);
+void signal_register_update(int r, int val);
+
+CPPEND
 #endif
-#endif
+
 								       

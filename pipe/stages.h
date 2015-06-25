@@ -9,13 +9,14 @@
 /********** Pipeline register contents **************/
 
 /* Program Counter */
-typedef struct {
+struct pc_ele{
     word_t pc;
     stat_t status;
-} pc_ele, *pc_ptr;
+};
+typedef pc_ele* pc_ptr;
 
 /* IF/ID Pipe Register */
-typedef struct {
+struct if_id_ele{
     byte_t icode;  /* Single byte instruction code */
     byte_t ifun;    /* ALU/JMP qualifier */
     byte_t ra; /* Register ra ID */
@@ -25,10 +26,11 @@ typedef struct {
     stat_t status;
     /* The following is included for debugging */
     word_t stage_pc;
-} if_id_ele, *if_id_ptr;
+};
+typedef if_id_ele* if_id_ptr;
 
 /* ID/EX Pipe Register */
-typedef struct {
+struct id_ex_ele{
     byte_t icode;        /* Instruction code */
     byte_t ifun;        /* ALU/JMP qualifier */
     word_t valc;        /* Immediate data */
@@ -41,10 +43,11 @@ typedef struct {
     stat_t status;
     /* The following is included for debugging */
     word_t stage_pc;
-} id_ex_ele, *id_ex_ptr;
+};
+typedef id_ex_ele* id_ex_ptr;
 
 /* EX/MEM Pipe Register */
-typedef struct {
+struct ex_mem_ele{
     byte_t icode;        /* Instruction code */
     byte_t ifun;          /* ALU/JMP qualifier */
     bool_t takebranch;  /* Taken branch signal */
@@ -56,10 +59,11 @@ typedef struct {
     stat_t status;
     /* The following is included for debugging */
     word_t stage_pc;
-} ex_mem_ele, *ex_mem_ptr;
+};
+typedef ex_mem_ele* ex_mem_ptr;
 
 /* Mem/WB Pipe Register */
-typedef struct {
+struct mem_wb_ele{
     byte_t icode;        /* Instruction code */
     byte_t ifun;         /* ALU/JMP qualifier */
     word_t vale;         /* valE */
@@ -69,15 +73,24 @@ typedef struct {
     stat_t status;
     /* The following is included for debugging */
     word_t stage_pc;
-} mem_wb_ele, *mem_wb_ptr;
+};
+typedef mem_wb_ele* mem_wb_ptr;
 
 /************ Global Declarations ********************/
 
-extern pc_ele bubble_pc;
-extern if_id_ele bubble_if_id;
-extern id_ex_ele bubble_id_ex;
-extern ex_mem_ele bubble_ex_mem;
-extern mem_wb_ele bubble_mem_wb;
+const pc_ele bubble_pc = {0,STAT_AOK};
+const if_id_ele bubble_if_id = { I_NOP, 0, REG_NONE,REG_NONE,
+               0, 0, STAT_BUB, 0};
+const id_ex_ele bubble_id_ex = { I_NOP, 0, 0, 0, 0,
+               REG_NONE, REG_NONE, REG_NONE, REG_NONE,
+               STAT_BUB, 0};
+
+const ex_mem_ele bubble_ex_mem = { I_NOP, 0, FALSE, 0, 0,
+                 REG_NONE, REG_NONE, STAT_BUB, (stat_t)0};
+
+const mem_wb_ele bubble_mem_wb = { I_NOP, 0, 0, 0, REG_NONE, REG_NONE,
+                 STAT_BUB, 0};
+
 
 /************ Function declarations *******************/
 

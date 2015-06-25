@@ -34,8 +34,8 @@ HCL2C=$(MISCDIR)/hcl2c
 INC=$(TKINC) -I$(MISCDIR) $(GUIMODE)
 LIBS=$(TKLIBS) -lm
 YAS = ../misc/yas
-SOURCES = psim.c psim_main.c utils.c simulator.c psim_gui.c#
-HEADERS = utils.h sim.h simulator.h psim_gui.hpp#
+SOURCES = psim.c psim_main.c utils.c simulator.c psim_gui.c # need to compile using -DHAS_GUI
+HEADERS = utils.h sim.h simulator.h #
 
 all: psim drivers
 
@@ -58,6 +58,7 @@ drivers:
 .ys.yo:
 	$(YAS) $*.ys
 
-
+run:
+	./psim -tcu -o ./core1.txt -d ./core2.txt -i ../y86-code/asum.yo
 clean:
 	rm -f psim pipe-*.c *.o *.exe *~

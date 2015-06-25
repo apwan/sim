@@ -1,4 +1,4 @@
-#include "utils.h"
+#include <cstdio>
 #include "sim.h"
 
 /* Representations of digits */
@@ -36,11 +36,7 @@ void wstring(unsigned x, int bpd, int bpw, char *str)
 
 /* used for formatting instructions */
 static char status_msg[128];
-char *format_pc(pc_ptr state);
-char *format_if_id(if_id_ptr state);
-char *format_id_ex(id_ex_ptr state);
-char *format_ex_mem(ex_mem_ptr state);
-char *format_mem_wb(mem_wb_ptr state);
+
 
 
 char *format_pc(pc_ptr state){

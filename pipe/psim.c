@@ -13,6 +13,112 @@
 #include "sim.h"
 #include "simulator.h"
 
+/*  implementation without Simulator class */
+
+
+/*
+ * run_tty_sim - Run the simulator in TTY mode
+ */
+void run_tty_sim(sim_config conf)
+{
+    int icount = 0;
+    byte_t run_status = STAT_AOK;
+    cc_t result_cc = 0;
+    int byte_cnt = 0;
+    mem_t mem0, reg0;
+    state_ptr isa_state = NULL;
+
+
+    /* In TTY mode, the default object file comes from stdin */
+    if (!conf.object_file) {
+        conf.object_file = stdin;
+    }
+
+    if (conf.verbosity >= 2)
+        sim_set_dumpfile(stdout);
+    sim_init();
+    // init_cache(6, 8, mem);
+
+
+    /* Emit simulator name */
+    if (conf.verbosity >= 2)
+        printf("%s\n", simname);
+
+    byte_cnt = mem->load(conf.object_file, 1);
+    if (byte_cnt == 0) {
+        fprintf(stderr, "No lines of code found\n");
+        exit(1);
+    } else if (conf.verbosity >= 2) {
+        printf("%d bytes of code read\n", byte_cnt);
+    }
+    fclose(conf.object_file);
+    if (conf.do_check) {
+        isa_state = new StateRec(mem,reg,cc);
+
+    }
+
+    mem0 = copy_mem(mem);
+    reg0 = copy_mem(reg);
+
+    if(Use_Cache && mem->useCache()){
+        printf("USE CACHE\n");
+    }
+    icount = run_pipe(conf.instr_limit, 5*conf.instr_limit, &run_status, &result_cc);
+    if (conf.verbosity > 0) {
+        printf("%d instructions executed\n", icount);
+        printf("Status = %s\n", stat_name((stat_t)run_status));
+        printf("Condition Codes: %s\n", cc_name(result_cc));
+        printf("Changed Register State:\n");
+        diff_reg(reg0, reg, stdout);
+        printf("Changed Memory State:\n");
+        diff_mem(mem0, mem, stdout);
+    }
+    if (conf.do_check) {
+        byte_t e = STAT_AOK;
+        int step;
+        bool_t match = TRUE;
+
+        printf("start pipe check\n");
+        for (step = 0; step < conf.instr_limit && e == STAT_AOK; step++) {
+            e = step_state(isa_state, stdout);
+        }
+
+    if (diff_reg(isa_state->r, reg, NULL)) {
+        match = FALSE;
+        if (conf.verbosity > 0) {
+            printf("ISA Register != Pipeline Register File\n");
+            diff_reg(isa_state->r, reg, stdout);
+        }
+    }
+    if (diff_mem(isa_state->m, mem, NULL)) {
+        match = FALSE;
+        if (conf.verbosity > 0) {
+            printf("ISA Memory != Pipeline Memory\n");
+            diff_mem(isa_state->m, mem, stdout);
+        }
+    }
+    if (isa_state->cc != result_cc) {
+        match = FALSE;
+        if (conf.verbosity > 0) {
+            printf("ISA Cond. Codes (%s) != Pipeline Cond. Codes (%s)\n",
+               cc_name(isa_state->cc), cc_name(result_cc));
+        }
+    }
+    if (match) {
+        printf("ISA Check Succeeds\n");
+    } else {
+        printf("ISA Check Fails\n");
+    }
+    }
+
+    /* Emit CPI statistics */
+    {
+    double cpi = instructions > 0 ? (double) cycles/instructions : 1.0;
+    printf("CPI: %d cycles/%d instructions = %.2f\n",
+           cycles, instructions, cpi);
+    }
+
+}
 
 
 
@@ -98,13 +204,14 @@ sim_mode_t sim_mode = S_FORWARD;
 /* Log file */
 FILE *dumpfile = NULL;
 
+
+
+
 /*****************************************************************************
  * reporting code
  *****************************************************************************/
 
-#ifdef HAS_GUI
 
-#endif /* HAS_GUI */
 
 /* Report system state */
 static void sim_report() 
@@ -127,10 +234,10 @@ static void sim_report()
 	report_state("M", 1, format_ex_mem(ex_mem_curr));
 	report_state("W", 0, format_mem_wb(mem_wb_next));
 	report_state("W", 1, format_mem_wb(mem_wb_curr));
-	/* signal_sources(); */
+    /* signal_sources(amux, bmux); */
 	show_cc(cc);
 	show_stat(status);
-	show_cpi();
+    show_cpi(instructions, cycles);
     }
 #endif
 
@@ -141,18 +248,8 @@ static void sim_report()
  * These functions can be used to handle hazards
  *****************************************************************************/
 
-pc_ele bubble_pc = {0,STAT_AOK};
-if_id_ele bubble_if_id = { I_NOP, 0, REG_NONE,REG_NONE,
-               0, 0, STAT_BUB, 0};
-id_ex_ele bubble_id_ex = { I_NOP, 0, 0, 0, 0,
-               REG_NONE, REG_NONE, REG_NONE, REG_NONE,
-               STAT_BUB, 0};
+Pipes pip;
 
-ex_mem_ele bubble_ex_mem = { I_NOP, 0, FALSE, 0, 0,
-                 REG_NONE, REG_NONE, STAT_BUB, (stat_t)0};
-
-mem_wb_ele bubble_mem_wb = { I_NOP, 0, 0, 0, REG_NONE, REG_NONE,
-                 STAT_BUB, 0};
 
 
 
@@ -191,17 +288,14 @@ void sim_init()
     /* Create memory and register files */
     initialized = 1;
     mem = init_mem(MEM_SIZE);
-
-
     reg = init_reg();
 
-    
     /* create 5 pipe registers */
-    pc_state     = new_pipe(sizeof(pc_ele), (void *) &bubble_pc);
-    if_id_state  = new_pipe(sizeof(if_id_ele), (void *) &bubble_if_id);
-    id_ex_state  = new_pipe(sizeof(id_ex_ele), (void *) &bubble_id_ex);
-    ex_mem_state = new_pipe(sizeof(ex_mem_ele), (void *) &bubble_ex_mem);
-    mem_wb_state = new_pipe(sizeof(mem_wb_ele), (void *) &bubble_mem_wb);
+    pc_state     = pip[0];
+    if_id_state  = pip[1];
+    id_ex_state  = pip[2];
+    ex_mem_state = pip[3];
+    mem_wb_state = pip[4];
   
     /* connect them to the pipeline stages */
     pc_next   = (pc_ptr)pc_state->next;
@@ -228,7 +322,7 @@ void sim_reset()
 {
     if (!initialized)
         sim_init();
-    clear_pipes();
+    pip.clear();
     clear_mem(reg);
     minAddr = 0;
     memCnt = 0;
@@ -240,7 +334,7 @@ void sim_reset()
 #ifdef HAS_GUI
     if (gui_mode) {
         signal_register_clear();
-        create_memory_display();//(minAddr, memCnt);
+        create_memory_display(minAddr, memCnt);
     }
 #endif
 
@@ -286,11 +380,6 @@ static void update_state(bool_t update_mem, bool_t update_cc)
 	    sim_log("\tCouldn't write to address 0x%x\n", mem_addr);
 	} else {
 	    sim_log("\tWrote 0x%x to address 0x%x\n", mem_data, mem_addr);
-
-
-
-
-
 
 
 #ifdef HAS_GUI
@@ -354,7 +443,7 @@ void tty_report(int cyc) {
 /* Return status of processor */
 /* Max_instr indicates maximum number of instructions that
    want to complete during this simulation run.  */
-static byte_t sim_step_pipe(int max_instr, int ccount)
+byte_t sim_step_pipe(int max_instr, int ccount)
 {
     byte_t wb_status = mem_wb_curr->status;
     byte_t mem_status = mem_wb_next->status;
@@ -367,7 +456,7 @@ static byte_t sim_step_pipe(int max_instr, int ccount)
     /* Update program-visible state */
     update_state(update_mem, update_cc);
     /* Update pipe registers */
-    update_pipes();
+    pip.update();
     tty_report(ccount);
     if (pc_state->op == P_ERROR)
 	pc_curr->status = STAT_PIP;
@@ -422,25 +511,31 @@ static byte_t sim_step_pipe(int max_instr, int ccount)
   if statusp nonnull, then will be set to status of final instruction
   if ccp nonnull, then will be set to condition codes of final instruction
 */
-int sim_run_pipe(int max_instr, int max_cycle, byte_t *statusp, cc_t *ccp)
-{
+
+int run_pipe(int max_instr, int max_cycle, byte_t *statusp, cc_t *ccp, Simulator *s){
+
     int icount = 0;
     int ccount = 0;
     byte_t run_status = STAT_AOK;
+
+
+
     while (icount < max_instr && ccount < max_cycle) {
-        run_status = sim_step_pipe(max_instr-icount, ccount);
-	if (run_status != STAT_BUB)
-	    icount++;
-	if (run_status != STAT_AOK && run_status != STAT_BUB)
-	    break;
-	ccount++;
+        run_status = s? s->step_pipe(max_instr-icount, ccount): sim_step_pipe(max_instr-icount, ccount);
+        if (run_status != STAT_BUB)
+            icount++;
+        if (run_status != STAT_AOK && run_status != STAT_BUB)
+            break;
+        ccount++;
     }
     if (statusp)
-	    *statusp = run_status;
+        *statusp = run_status;
     if (ccp)
-	    *ccp = cc;
+        *ccp = s? s->cc: cc;
     return icount;
+
 }
+
 
 /* If dumpfile set nonNULL, lots of status info printed out */
 void sim_set_dumpfile(FILE *df)
@@ -462,44 +557,10 @@ void sim_log( const char *format, ... ) {
 }
 
 
-/*************************************************************
- * Part 3: This part contains support for the GUI simulator
- *************************************************************/
-/*#define HAS_GUI */
-
-#ifdef HAS_GUI
-
-/**********************
- * Begin Part 3 globals	
- **********************/
-
-/* Hack for SunOS */
-#ifndef __cplusplus
-extern int matherr();
-int *tclDummyMathPtr = (int *) matherr;
-#endif
-
-#include "psim_gui.hpp"
-
-#endif /* HAS_GUI */
-
 
 /**************************************************************
  * Part 4: Code for implementing pipelined processor simulators
  *************************************************************/
-
-/******************************************************************************
- *	defines
- ******************************************************************************/
-
-
-
-/******************************************************************************
- *	static variables
- ******************************************************************************/
-
-static pipe_ptr pipes[MAX_STAGE];
-static int pipe_count = 0;
 
 /******************************************************************************
  *	function definitions
@@ -507,64 +568,93 @@ static int pipe_count = 0;
 
 /* Create new pipe with count bytes of state */
 /* bubble_val indicates state corresponding to pipeline bubble */
-pipe_ptr new_pipe(int count, void *bubble_val)
-{
-  pipe_ptr result = (pipe_ptr) malloc(sizeof(pipe_ele));
-  result->current = malloc(count);
-  result->next = malloc(count);
-  memcpy(result->current, bubble_val, count);
-  memcpy(result->next, bubble_val, count);
-  result->count = count;
-  result->op = P_LOAD;
-  result->bubble_val = bubble_val;
-  pipes[pipe_count++] = result; 
-  return result;
+
+
+PipeRec::PipeRec(int c, void *bv){
+    bubble_val = bv;/* Contents of register when bubble occurs */
+    count = c;/* Number of state bytes */
+    op = P_LOAD;
+    current = malloc(count);
+    next = malloc(count);
+    memcpy(current, bubble_val, count);
+    memcpy(next, bubble_val, count);
+}
+PipeRec::~PipeRec(){
+    free(current);
+    free(next);
+}
+void PipeRec::clear(){
+    memcpy(current, bubble_val, count);
+    memcpy(next, bubble_val, count);
+    op = P_LOAD;
 }
 
-/* Update all pipes */
-void update_pipes()
-{
-  int s;
-  for (s = 0; s < pipe_count; s++) {
-    pipe_ptr p = pipes[s];
-    switch (p->op)
+void PipeRec::update(){
+    switch (op)
       {
       case P_BUBBLE:
-      	/* insert a bubble into the next stage */
-      	memcpy(p->current, p->bubble_val, p->count);
-      	break;
-      
+        /* insert a bubble into the next stage */
+        memcpy(current, bubble_val, count);
+        break;
+
       case P_LOAD:
-      	/* copy calculated state from previous stage */
-      	memcpy(p->current, p->next, p->count);
-      	break;
+        /* copy calculated state from previous stage */
+        memcpy(current, next, count);
+        break;
       case P_ERROR:
-	  /* Like a bubble, but insert error condition */
-      	memcpy(p->current, p->bubble_val, p->count);
-      	break;
+      /* Like a bubble, but insert error condition */
+        memcpy(current, bubble_val, count);
+        break;
       case P_STALL:
       default:
-      	/* do nothing: next stage gets same instr again */
-      	;
+        /* do nothing: next stage gets same instr again */
+        ;
       }
-    if (p->op != P_ERROR)
-	p->op = P_LOAD;
-  }
+    if (op != P_ERROR)
+    op = P_LOAD;
+
 }
 
-/* Set all pipes to bubble values */
-void clear_pipes()
-{
-  int s;
-  for (s = 0; s < pipe_count; s++) {
-    pipe_ptr p = pipes[s];
-    memcpy(p->current, p->bubble_val, p->count);
-    memcpy(p->next, p->bubble_val, p->count);
-    p->op = P_LOAD;
-  }
+Pipes::Pipes(){
+    count = 0;
+    add(sizeof(pc_ele), (void *) new pc_ele(bubble_pc));
+    add(sizeof(if_id_ele), (void *) new if_id_ele(bubble_if_id));
+    add(sizeof(id_ex_ele), (void *) new id_ex_ele(bubble_id_ex));
+    add(sizeof(ex_mem_ele), (void *) new ex_mem_ele(bubble_ex_mem));
+    add(sizeof(mem_wb_ele), (void *) new mem_wb_ele(bubble_mem_wb));
 }
 
-/******************** Utility Code *************************/
+Pipes::~Pipes(){
+    int i;
+    for(i=0;i<count;++i){
+        delete pipes[i]->bubble_val;
+        delete pipes[i];
+    }
+}
+
+pipe_ptr Pipes::add(int c, void *bubble_val){
+    return pipes[count++] = new PipeRec(c, bubble_val);
+}
+
+void Pipes::update(){
+    int s;
+    for (s = 0; s < count; s++) {
+      pipes[s]->update();
+    }
+
+}
+
+void Pipes::clear(){
+    int s;
+    for (s = 0; s < count; s++) {
+      pipes[s]->clear();
+    }
+
+}
+
+pipe_ptr &Pipes::operator[](int i){
+    return pipes[i];
+}
 
 
 
@@ -703,16 +793,16 @@ void do_ex_stage()
     ex_mem_next->takebranch = e_bcond;
 
     if (id_ex_curr->icode == I_JMP)
-      sim_log("\tExecute: instr = %s, cc = %s, branch %staken\n",
-	      iname(HPACK(id_ex_curr->icode, id_ex_curr->ifun)),
-	      cc_name(cc),
-	      ex_mem_next->takebranch ? "" : "not ");
+        sim_log("\tExecute: instr = %s, cc = %s, branch %staken\n",
+                iname(HPACK(id_ex_curr->icode, id_ex_curr->ifun)),
+                cc_name(cc),
+                ex_mem_next->takebranch ? "" : "not ");
     
     /* Perform the ALU operation */
     word_t aluout = compute_alu(alufun, alua, alub);
     ex_mem_next->vale = aluout;
     sim_log("\tExecute: ALU: %c 0x%x 0x%x --> 0x%x\n",
-	    op_name(alufun), alua, alub, aluout);
+            op_name(alufun), alua, alub, aluout);
 
     if (setcc) {
 	cc_in = compute_cc(alufun, alua, alub);
@@ -778,19 +868,7 @@ int gen_E_stall(), gen_E_bubble();
 int gen_M_stall(), gen_M_bubble();
 int gen_W_stall(), gen_W_bubble();
 
-p_stat_t pipe_cntl(char *name, int stall, int bubble)
-{
-    if (stall) {
-	if (bubble) {
-	    sim_log("%s: Conflicting control signals for pipe register\n",
-		    name);
-	    return P_ERROR;
-	} else 
-	    return P_STALL;
-    } else {
-	return bubble ? P_BUBBLE : P_LOAD;
-    }
-}
+
 
 void do_stall_check()
 {
@@ -799,6 +877,21 @@ void do_stall_check()
     id_ex_state->op = pipe_cntl("EX", gen_E_stall(), gen_E_bubble());
     ex_mem_state->op = pipe_cntl("MEM", gen_M_stall(), gen_M_bubble());
     mem_wb_state->op = pipe_cntl("WB", gen_W_stall(), gen_W_bubble());
+}
+
+
+p_stat_t pipe_cntl(char *name, int stall, int bubble)
+{
+    if (stall) {
+    if (bubble) {
+        sim_log("%s: Conflicting control signals for pipe register\n",
+            name);
+        return P_ERROR;
+    } else
+        return P_STALL;
+    } else {
+    return bubble ? P_BUBBLE : P_LOAD;
+    }
 }
 
 

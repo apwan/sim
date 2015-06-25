@@ -20,8 +20,6 @@
 #endif
 
 
-extern int gui_mode;
-
 /**************** Registers *************************/
 
 /* REG_NONE is a special one to indicate no register */
@@ -79,7 +77,7 @@ typedef bool bool_t;
 #define BPL 32
 
 /* Table used to encode information about instructions */
-typedef struct {
+struct instr_t{
   char *name;
   unsigned char code; /* Byte code for instruction+op */
   int bytes;
@@ -89,7 +87,8 @@ typedef struct {
   arg_t arg2;
   int arg2pos;
   int arg2hi;  /* 0/1 */
-} instr_t, *instr_ptr;
+};
+typedef instr_t* instr_ptr;
 
 instr_ptr find_instr(char *name);
 
@@ -100,7 +99,6 @@ instr_ptr bad_instr();
 typedef unsigned char byte_t;
 typedef int word_t;
 
-/* number of address bits */
 
 CPPBEGIN
 
@@ -117,15 +115,19 @@ CPPBEGIN
 #define CACHE_MASK(s) (~((-1)<<(s)))
 #define MASK(s,t) ((-1<<(t))^(-1<<(s)))
 
+typedef void (*void_func_dint)(int,int);
+typedef void (*void_func_dint_dcharptr)(int,int,char*,char*);
+
 //forward declaration
 class CacheRec;
+class BusController;
 
 class MemRec {
 public:
     MemRec();
     MemRec(int l);
     MemRec(const MemRec&);
-    ~MemRec();
+    virtual ~MemRec();
 
     int getLen();
     virtual bool_t getByte(word_t pos, byte_t *dest);
@@ -134,12 +136,13 @@ public:
     virtual bool_t setWord(word_t pos, word_t val);
     virtual void dump(FILE *outfile, word_t pos, int l);
     virtual bool_t clear();
-    int load(FILE *infile, int report_error);
+    virtual int load(FILE *infile, int report_error);
 
     bool_t getCacheByte(word_t pos, byte_t *dest);
     bool_t getCacheWord(word_t pos, word_t *dest);
     bool_t setCacheByte(word_t pos, byte_t val);
     bool_t setCacheWord(word_t pos, word_t val);
+    bool_t swapCacheWord(word_t pos, word_t *dest);
 
     MemRec &operator=(const MemRec &);
     bool_t operator!=(const MemRec &);
@@ -148,14 +151,23 @@ public:
     friend bool_t diff_mem(MemRec* oldm, MemRec* newm, FILE *outfile);
     /* Print the differences between two regs */
     friend bool_t diff_reg(MemRec* oldr, MemRec* newr, FILE *outfile);
+
+    bool_t useCache(int b=CACHE_b, int s=CACHE_s, int E=CACHE_E, int t=CACHE_t);
+    virtual void setReporter(void* func_ptr); // for GUI display
+    bool_t share(BusController *b);
+    friend class BusController;
+    friend class CacheRec;
 protected:
     int len;
     //word_t maxaddr;
     byte_t *contents;
     CacheRec *ca; //cache
-    bool_t useCache(int b=CACHE_b, int s=CACHE_s, int E=CACHE_E, int t=CACHE_t);
+    void *reporter = NULL;
+    BusController *bus;
+
 };
 
+typedef MemRec* mem_t;
 
 typedef struct{
     int len;
@@ -193,16 +205,9 @@ typedef struct{
 #define set_reg_val(REG,id,val) ((RegRec*)REG)->setVal(id,val)
 #define dump_reg(outfile, REG) (REG)->dump(outfile)
 
-typedef MemRec* mem_t;
 
 
-
-typedef struct {
-    byte_t valid:1;
-    byte_t dirty:1;
-    byte_t tag:6;
-    byte_t block[CACHE_B];
-} cache_line;
+//#define CHECK_CACHE
 
 
 class CacheRec: public MemRec {
@@ -223,24 +228,28 @@ public:
     void clear(bool_t wb=FALSE);/*wb: writeBack? */
     void dump(FILE *outfile, word_t s, int l);
 
+
 private:
     mem_t tm; // target mem
-    bool_t *valid, *dirty;
+    bool_t *valid;
+    bool_t *dirty;
     byte_t *tags;
     int cb,cB,cs,cS,cE,ct;// cache params
     int nlines;
     word_t makePos(byte_t tag, int setIndex, int offset = 0);
     bool_t parsePos(word_t pos, int *indexPtr, byte_t *tagPtr, int *offsetPtr=NULL);
+//if CHECK_CACHE
+    mem_t checker;
+
 
 };
 
 
 
 
+
 /********** Implementation of Register File *************/
 
-
-/* Print the differences between two register files */
 
 
 class RegRec: public MemRec{
@@ -251,14 +260,22 @@ public:
     word_t getVal(int id);
     void setVal(int id, word_t val);
     void dump(FILE *outfile);
+    int load(FILE *infile, int report_error){return 0;}//disabled
+
+
+    void setReporter(void* func_ptr);
+
+
+
 
 };
 
 int reg_valid(int id);
-const struct {
+struct string_id_map{
     char *name;
     int id;// int -> reg_id_t
-} reg_table[REG_ERR+1] =
+};
+const string_id_map reg_table[REG_ERR+1] =
 {
     {"%eax",   REG_EAX},
     {"%ecx",   REG_ECX},
@@ -286,10 +303,11 @@ CPPEND
 
 /* Compute ALU operation */
 
-const struct {
+struct char_id_map{
     char symbol;
     int id;
-} alu_table[A_NONE+1] =
+};
+const char_id_map alu_table[A_NONE+1] =
 {
     {'+',   A_ADD},
     {'-',   A_SUB},
@@ -298,11 +316,13 @@ const struct {
     {'?',   A_NONE}
 };
 
+/* format hex as digits */
 #define hex2dig(c) (int)(isdigit((int)c)? (c - '0'): isupper((int)c)? (c - 'A' + 10): (c - 'a' + 10))
 
 
 word_t compute_alu(alu_t op, word_t arg1, word_t arg2);
 
+/* condition code */
 typedef unsigned char cc_t;
 
 #define GET_ZF(cc) (((cc) >> 2)&0x1)
@@ -348,7 +368,6 @@ struct StateRec{
   cc_t cc;
 };
 
-typedef StateRec state_rec;
 typedef StateRec* state_ptr;
 
 bool_t diff_state(state_ptr olds, state_ptr news, FILE *outfile);
@@ -357,20 +376,7 @@ bool_t diff_state(state_ptr olds, state_ptr news, FILE *outfile);
 bool_t cond_holds(cc_t cc, cond_t bcond);
 
 /* Execute single instruction.  Return status. */
-stat_t step_state(state_ptr s, FILE *error_file);
+stat_t step_state(state_ptr s, FILE *error_file, int gui_id = -1);
 
-
-/************************ Interface Functions *************/
-
-#ifdef HAS_GUI
-
-CPPBEGIN
-
-void report_line(int line_no, int addr, char *hexcode, char *line);
-void signal_register_update(int r, int val);
-
-CPPEND
-
-#endif
 
 #endif

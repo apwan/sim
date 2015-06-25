@@ -1,6 +1,6 @@
 *.o
 *.yo
-*.ys
+#*.ys
 *.exe
 pipe/psim
 seq/ssim
@@ -13,3 +13,7 @@ pipe/pipe-full.c
 misc/yas-grammar.c
 
 seq/seq-std.c
+
+misc/gen.py
+
+misc/test.yoo

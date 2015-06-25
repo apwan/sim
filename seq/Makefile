@@ -23,7 +23,7 @@ TKINC=-isystem /usr/include
 # flags.
 
 CC=g++
-CFLAGS=-Wall -O2 -BIG_MEM
+CFLAGS=-Wall -O2 -DBIG_MEM
 
 ##################################################
 # You shouldn't need to modify anything below here
