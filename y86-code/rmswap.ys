@@ -1,26 +1,97 @@
 # Execution begins at address 0
 	.pos 0
-  irmovl 0x1000, %eax
-  irmovl 0x1, %edx
-  nop
-  nop
-
-  irmovl 0x12345678, %ebx
-  rmmovl %ebx, 4(%eax)
-Start:  rmswap %edx, (%eax)
-  andl   %edx, %edx
-  jne    End
-  irmovl $4, %ebx
-  rmmovl %ebx, 4(%eax)
-  iaddl  $4, %edx
-  xorl   %ebx, %ebx
-  rmmovl %ebx, (%eax)
-  rmswap %edx, (%eax)
-  andl   %edx, %edx
-  je     Start
-  nop
-  nop
-End:    iaddl $-1, %edx
+# shared address determining the role
+        irmovl 0x200, %eax
+        irmovl 0x1, %edx
         nop
+        nop
+        jmp main
+
+        .align 4
+array:  .long  0xa000
+        .long  0x0b00
+        .long  0x00c0
+        .long  0x000d
+
+ping_addr: .long 0x0400
+pong_addr: .long 0x0300
+ping_count:.long 0x0250
+pong_count:.long 0x0260
+
+main:   rmswap %edx, (%eax)
+        andl   %edx, %edx
+        jne    Ponger
+
+Pinger: irmovl Stack1,  %esp
+        irmovl Stack1,  %ebp
+        irmovl 0x10, %ebx
+        irmovl 0x210, %ecx
+        rmmovl %ebx, (%ecx)
+
+        irmovl array,   %ecx
+        mrmovl (%ecx),  %ebx
+        rmmovl %ebx,    (%ebp)
+        nop
+        mrmovl 4(%ecx), %ebx
+        rmmovl %ebx,    -4(%ebp)
+        nop
+        mrmovl 8(%ecx), %ebx
+        rmmovl %ebx,    -8(%ebp)
+        nop
+        mrmovl 12(%ecx),%ebx
+        rmmovl %ebx,    -12(%ebp)
+
+        xorl %edx,   %edx
+        rmmovl %edx, (%eax)
+
+        xorl %eax, %eax       # exit signal
+        irmovl 0x210, %ecx
+        rmmovl %eax,  (%ecx)
+
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+
+        irmovl 0x220, %edx
+loop1:  mrmovl (%edx), %ebx # wait for signal
+        andl   %ebx,  %ebx
+        jne    loop1
+        jmp End
+
+Ponger: irmovl Stack2, %esp
+        irmovl Stack2, %ebp
+        irmovl array,   %ecx
+        nop
+        irmovl 0x20, %ebx
+        irmovl 0x220, %ecx
+        rmmovl %ebx, (%ecx)
+
+        nop
+        nop
+        nop
+        nop
+
+        irmovl 0x210, %edx
+loop2:  mrmovl (%edx), %ebx # wait for signal
+        andl   %ebx,  %ebx
+        jne     loop2
+
+
+        xorl   %eax,  %eax  # exit signal
+        irmovl 0x220, %ecx
+        rmmovl %eax,  (%ecx)
+        jmp End
+
+
+End:    nop
         nop
         halt
+
+        .pos 0x0f00
+Stack1:
+        .pos 0x0e00
+Stack2:
+/* end of rmswap */

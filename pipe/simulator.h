@@ -22,6 +22,7 @@ public:
 
     static Simulator sim0, sim1;
     static Simulator *simref[2];
+    static BusController *bc;
     static int showCoreId;
     static void *simfunc0(void *arg);
     void *simfunc1(void *arg);
@@ -108,6 +109,7 @@ public:
     char simname[50] = "Y86 Processor: pipe-full.hcl";
     int gui_mode = FALSE;    /* Run in GUI mode instead of TTY mode? (-g) */
     bool use_Cache = FALSE;
+    bool use_Bus = FALSE;
     char *object_filename;   /* The input object file name. */
     FILE *object_file;       /* Input file handle */
     char *output_filename = NULL;
@@ -150,6 +152,7 @@ public:
 
     /* data */
     int initialized = 0;
+    int finished = 0;
     /* Has simulator gotten past initial bubbles? */
     int starting_up = 1;
     /* How many cycles have been simulated? */

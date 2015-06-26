@@ -121,6 +121,7 @@ typedef void (*void_func_dint_dcharptr)(int,int,char*,char*);
 //forward declaration
 class CacheRec;
 class BusController;
+class Simulator;
 
 class MemRec {
 public:
@@ -157,6 +158,8 @@ public:
     bool_t share(BusController *b);
     friend class BusController;
     friend class CacheRec;
+    friend class Simulator;
+    friend void update_state(bool_t update_mem, bool_t update_cc);
 protected:
     int len;
     //word_t maxaddr;
@@ -168,15 +171,6 @@ protected:
 };
 
 typedef MemRec* mem_t;
-
-typedef struct{
-    int len;
-    byte_t *priv;
-    int max_priv;
-    byte_t *shrd;
-    int fd;
-} *mix_mem_rec, *mix_mem_t;
-
 
 
 

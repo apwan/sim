@@ -2,6 +2,7 @@
 #define SIM_H
 
 #include "isa.h"
+#include "bus.h"
 #include "pipeline.h"
 #include "stages.h"
 
@@ -20,7 +21,7 @@
 #define GET_RB(r) LO4(r)
 
 #define DEFAULT_VERBOSITY 2
-#define DEFAULT_INSTR_LIMIT 10000
+#define DEFAULT_INSTR_LIMIT 500000
 #define MAXBUF 1024
 #define DEFAULTNAME "Y86 Simulator: "
 #define MAXARGS 128
@@ -136,6 +137,7 @@ struct sim_config{
     int use_Gui = FALSE;    /* Run in GUI mode instead of TTY mode? (-g) */
     bool_t use_Class = FALSE;
     bool_t use_Cache = FALSE;
+    bool_t use_Bus = FALSE;
     char *input_filename = NULL;   /* The input object file name. */
     FILE *object_file;       /* Input file handle */
     char *output_filename = NULL;
@@ -143,7 +145,6 @@ struct sim_config{
     int verbosity = DEFAULT_VERBOSITY;    /* Verbosity level [TTY only] (-v) */
     int instr_limit = DEFAULT_INSTR_LIMIT; /* Instruction limit [TTY only] (-l) */
     bool_t do_check = FALSE; /* Test with ISA simulator? [TTY only] (-t) */
-
     bool_t dual = FALSE;
 };
 
@@ -248,14 +249,6 @@ void signal_register_clear();
 void show_cc(cc_t scc);
 void show_stat(stat_t stat);
 void show_cpi(int instr, int cyc);
-
-
-
-
-
-
-
-
 
 
 

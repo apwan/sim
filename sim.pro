@@ -38,4 +38,5 @@ SOURCES += misc/examples.c \
 DISTFILES += \
     pipe/pipe.tcl \
     y86-code/asum.ys \
-    y86-code/rmswap.ys
+    y86-code/rmswap.ys \
+    y86-code/pingpong.ys

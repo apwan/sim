@@ -1,0 +1,172 @@
+# Execution begins at address 0
+	.pos 0
+
+init:  irmovl 0x200, %eax  # shared address determining the role
+       irmovl 0x1, %edx
+       nop
+       nop
+       jmp main
+
+        .align 4
+array:  .long 0xabcd
+        .long 0x1357
+        .long 0x08fd
+        .long 0xa1b2
+
+        .align 4
+ping_data:   .long 0x210  #pinger_mark
+             .long 0x400  #ping_msg
+             .long 0x214  #ping_count
+
+         .align 4
+pong_data:   .long 0x220  #ponger_mark
+             .long 0x300  #pong_msg
+             .long 0x224  #pong_count
+
+         .align 4
+success:     .long 0x230  #
+
+main:   rmswap %edx, (%eax)
+        andl   %edx, %edx
+        jne    Ponger
+
+Pinger: irmovl Stack1,    %esp
+        irmovl Stack1,    %ebp
+        irmovl ping_data, %ecx
+        mrmovl (%ecx),    %edx   # ping_mark
+        irmovl 0x10,      %ebx
+        rmmovl %ebx,      (%edx) # *ping_mark = 0x10
+        mrmovl 4(%ecx),   %ebx
+        rmmovl %ebx,      (%ebp)    # msg = ping_msg, (%ebp)
+        mrmovl 8(%ecx),   %ebx
+        rmmovl %ebx,      -4(%ebp)  # ping_count, -4(%ebp)
+        irmovl pong_data, %ecx
+        mrmovl 4(%ecx),   %ebx
+        rmmovl %ebx,      -8(%ebp)   # pong_msg, -8(%ebp)
+        mrmovl 8(%ecx),   %ebx
+        rmmovl %ebx,      -12(%ebp)   # pong_count, -12(%ebp)
+        irmovl $4,        %ebx
+        rmmovl %ebx,      -16(%ebp)    # len = 4, -16(%ebp)
+        xorl   %ebx,      %ebx   # k = 0
+        rmmovl %ebx,      -20(%ebp)    # i = 0, -20(%ebp)
+loop1:  irmovl array,     %edi
+        addl   %ebx,      %edi   # array+k
+        mrmovl (%edi),    %eax   # buffer = array[k]
+        mrmovl (%ebp),    %edi   # msg
+        xorl   %edx,      %edx   # check = 0
+        mrmovl -12(%ebp), %esi   # j = len
+loop11: iaddl  0x8765,     %eax   # buffer += 0x8765
+        rmmovl %eax,      (%edi) # *msg = buffer
+        xorl   %eax,      %edx   # check ^= buffer
+        iaddl  $4,       %edi   # msg++
+        iaddl  $-1,       %esi   # j--
+        jg     loop11            # while j>0
+        mrmovl -16(%ebp), %edi   # len
+        mrmovl -4(%ebp),  %esi   # ping_count
+        rmmovl %edi,      (%esi) # *ping_count = len
+        mrmovl -12(%ebp), %edi   # pong_count
+loop12: nop
+        nop
+        nop
+        nop
+        nop
+        mrmovl (%edi),    %esi   # count = *pong_count
+        andl   %esi,      %esi
+        je     loop12            # (j = count)>0
+        mrmovl -8(%ebp),  %ecx   # msg = pong_msg
+loop13: mrmovl (%ecx),    %eax   # buffer= *pong_msg
+        iaddl  $4,        %ecx   # msg ++
+        iaddl  $-1,       %esi   # j--
+        andl   %esi,      %esi
+        jg     loop13
+        rmmovl %esi,      (%edi) # *pong_count = 0
+        xorl   %edx,      %eax   # check^buffer
+        jne    end1              # check!=buffer
+        iaddl  $4,        %ebx   # k++
+        rrmovl %ebx,      %eax
+        xorl   %ecx,      %ecx
+        iaddl  $-16,       %eax   # if (k-4==0)
+        cmovle %ecx,      %ebx   # k = 0
+        mrmovl -16(%ebp), %eax   # len
+        iaddl  $2,        %eax   # len += 2
+        rmmovl %eax,      -16(%ebp)
+        mrmovl -20(%ebp), %eax   # i
+        iaddl  $1,        %eax   # i++
+        rmmovl %eax,      -20(%ebp)
+        iaddl  $-100,     %eax   # while(i-100<0)
+        jl     loop1
+
+end1:   mrmovl -20(%ebp),  %eax   # i
+        irmovl success,    %ecx
+        mrmovl (%ecx),     %ecx   # success
+        rmmovl %eax,       (%ecx) # success = i;
+        irmovl ping_data,  %ecx
+        mrmovl (%ecx),     %ecx   # pinger_mark
+        xorl   %ebx,       %ebx
+        rmmovl %ebx,       (%ecx) # pinger_mark = 0x0
+        nop
+        nop
+        jmp End
+
+Ponger: irmovl Stack2,     %esp
+        irmovl Stack2,     %ebp
+        irmovl pong_data,  %ecx
+        mrmovl (%ecx),     %edx  # ponger_mark
+        irmovl 0x20,       %ebx
+        rmmovl %ebx,       (%edx)  # *ponger_mark = 0x20
+        mrmovl 4(%ecx),    %edx
+        rmmovl %edx,       (%ebp)  # pong_msg, (%ebp)
+        mrmovl 8(%ecx),    %edx
+        rmmovl %edx,       -4(%ebp) # pong_count, -4(%ebp)
+        irmovl ping_data,  %ecx
+        mrmovl (%ecx),     %edi
+        rmmovl %edi,       -8(%ebp) # pinger_mark, -8(%ebp)
+        mrmovl 4(%ecx),    %edx
+        rmmovl %edx,       -12(%ebp) # ping_msg, -12(%ebp)
+        mrmovl 8(%ecx),    %edx
+        rmmovl %edx,       -16(%ebp) # ping_count, -16(%ebp)
+
+loop2:  nop
+        nop
+        nop
+        nop
+        mrmovl (%edi),     %esi   # pinger = *pinger_mark
+        andl   %esi,       %esi
+        je     end2
+        mrmovl (%edx),     %ebx   # count = *ping_count
+        andl   %ebx,       %ebx   # (i = count) > 0
+        je     loop2
+        mrmovl -12(%ebp),   %esi  # msg = ping_msg
+        xorl   %edx,       %edx   # check = 0x0
+loop21: mrmovl (%esi),     %eax   # buffer = *msg
+        xorl   %eax,       %edx   # check ^= buffer
+        iaddl  $4,         %esi   # msg++
+        iaddl  $-1,        %ebx   # i--
+        jg     loop21             # i>0
+        mrmovl -16(%ebp),  %ecx   # ping_count
+        rmmovl %ebx,       (%ecx) # *ping_count = i = 0
+        mrmovl (%ebp),     %ecx   # pong_msg
+        rmmovl %edx,       (%ecx) # *pong_msg = check
+        mrmovl -4(%ebp),   %ecx   # pong_count
+        irmovl $1,         %edx
+        rmmovl %edx,       (%ecx) # *pong_count = 1
+        nop
+        nop
+        jmp    loop21
+
+end2:   xorl   %eax,       %eax
+        irmovl pong_data,  %ecx
+        mrmovl (%ecx),     %ecx   # ponger_mark
+        rmmovl %eax,       (%ecx) # *ponger_mark = 0x0
+        jmp End
+
+End:    nop
+        nop
+        halt
+
+        .pos 0x0f00
+Stack1:
+#
+        .pos 0x0e00
+Stack2:
+/* end of pingpong.ys */

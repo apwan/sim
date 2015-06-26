@@ -117,9 +117,15 @@ bool_t parse_arg(sim_config *conf, int argc, char *argv[]){
 int run_dual(char *argv1, sim_config &conf){
 
     conf.use_Class = TRUE;
+    conf.use_Bus = TRUE;
+    conf.do_check = FALSE;
+    BusController bus(1<<12, CACHE_B);
+    Simulator::bc = &bus;
+
     Simulator::sim0.config(conf);
     conf.output_filename = conf.output_filename2;
     Simulator::sim1.config(conf);
+
 
     pthread_t thrd1, thrd2;
     if(pthread_create(&thrd1,NULL,Simulator::simfunc0,(void*)0)){

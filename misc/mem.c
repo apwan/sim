@@ -10,17 +10,19 @@
 
 /* memory */
 
-MemRec::MemRec():len(0),contents(NULL),ca(NULL){}
+MemRec::MemRec():len(0),contents(NULL),ca(NULL),bus(NULL){}
 MemRec::MemRec(int l){
     len = ((l+BPL-1)/BPL)*BPL;
     contents = new byte_t[len];
     ca = NULL;
+    bus = NULL;
 }
 MemRec::MemRec(const MemRec &m){
     len = m.len;
     contents = new byte_t[len];
     memcpy(contents, m.contents, len);
     ca = NULL;
+    bus = NULL;
 }
 MemRec::~MemRec(){
     printf("mem releasing\n");
@@ -35,11 +37,16 @@ int MemRec::getLen(){
 }
 
 MemRec &MemRec::operator=(const MemRec &m){
+    if(bus) bus->remove(this);
+    bus = NULL;
+    if(ca) delete ca;
+    ca = NULL;
     if(m.len != len){
         delete []contents;
         len = m.len;
         contents = new byte_t[len];
     }
+
     memcpy(contents, m.contents, len);
     return *this;
 }
@@ -85,6 +92,7 @@ void MemRec::dump(FILE *outfile, word_t pos, int l){
 }
 
 bool_t MemRec::clear(){
+    printf("clear mem\n");
     memset(contents, 0, len);
     if(ca){
         ca->clear();
@@ -129,7 +137,8 @@ bool_t MemRec::setWord(word_t pos, word_t val){
 
 bool_t MemRec::getCacheByte(word_t pos, byte_t *dest){
 
-        return ca? ca->getByte(pos,dest): getByte(pos,dest);
+
+    return ca? ca->getByte(pos,dest): getByte(pos,dest);
 
 
 }
@@ -138,7 +147,7 @@ bool_t MemRec::getCacheByte(word_t pos, byte_t *dest){
 
 bool_t MemRec::getCacheWord(word_t pos, word_t *dest){
 
-        return ca? ca->getWord(pos,dest):getWord(pos,dest);
+    return ca? ca->getWord(pos,dest):getWord(pos,dest);
 }
 
 bool_t MemRec::setCacheByte(word_t pos, byte_t val){
@@ -163,6 +172,7 @@ bool_t MemRec::setCacheByte(word_t pos, byte_t val){
 
 bool_t MemRec::setCacheWord(word_t pos, word_t val){
     if(bus && bus->isShared(pos)){
+
         int j;
         for(j=0;j<bus->shared_count;++j){
             if(bus->mem_map[j]==this)
@@ -177,8 +187,15 @@ bool_t MemRec::setCacheWord(word_t pos, word_t val){
             return TRUE;
         }
 
-    }else
-        return ca? ca->setWord(pos,val): setWord(pos,val);
+    }else{
+        printf("set cache word, 0x%x\n",ca);
+        if(ca){
+            return ca->setWord(pos,val);
+        }else{
+            return setWord(pos,val);
+        }
+
+    }
 }
 
 bool_t MemRec::swapCacheWord(word_t pos, word_t *dest){
@@ -451,9 +468,25 @@ CacheRec::~CacheRec(){
 void CacheRec::clear(bool_t wb){
     if(wb){ /* write back */
         int i;
+        if(tm->bus){
+            int id;
+            for(id=tm->bus->shared_count-1;id>=0;--id){
+                if(tm->bus->mem_map[id] == tm)
+                    break;
+            }
+            for(i=0;i<nlines;++i){
+                if(valid[i] && dirty[i]){
+                    int pos = makePos(tags[i], i/cE);
+                    commit(i);
+                    tm->bus->syncBlock(pos/cB,id);
+                }
 
-        for(i=0;i<nlines;++i){
-            commit(i);
+            }
+
+        }else{
+            for(i=0;i<nlines;++i){
+                commit(i);
+            }
         }
         printf("commit all cache\n");
     }
@@ -467,20 +500,22 @@ bool_t CacheRec::commit(word_t i){ // check i?
     if(valid[i] && dirty[i]){
         word_t pos = makePos(tags[i],i/cE);
         byte_t *cur = contents + i*cB;
-        byte_t *end = cur + cB;
+        //byte_t *end = cur + cB;
 #ifdef CHECK_CACHE
         if(checker){
             checker->dump(stdout, pos, cB);
         }
 #endif
         word_t val;
-        for(;cur<end;cur+=4,pos+=4){/* not shared */
+        memcpy(tm->contents+pos,cur,cB);
+        /*
+        for(;cur<end;cur+=4,pos+=4){
             val = *(word_t*)cur;
             if(! tm->setWord(pos,val))
                 printf("write back fail.\nCache line: %d, Mem pos: %d\n",i,pos);
         }
+    */
         dirty[i] = FALSE;
-        //printf("commit cache line %.4x\n", i);
         //dump(stdout,i,1);
 
         return TRUE;
@@ -540,9 +575,9 @@ bool_t CacheRec::retrieve(byte_t tag, word_t i){
     word_t end = pos+cB;
     if(end>len) return FALSE;
 
-    byte_t *cur = contents + (i<<cb);
+    void *cur = (void*)(contents + (i<<cb));
     word_t val;
-    //printf("retrieve cache from pos %.4x\n", pos);
+    printf("retrieve cache from pos %.4x\n", pos);
     if(tm->bus && tm->bus->isShared(pos)){
         int j;
         for(j=0;j<tm->bus->shared_count;++j){
@@ -551,9 +586,10 @@ bool_t CacheRec::retrieve(byte_t tag, word_t i){
         }
         tm->bus->signal_allocate(pos/cB,j);
         memcpy(cur, (void*)(tm->contents+pos), cB);
-        tm->bus->recs[j][pos/cB] ^= REC_READ;
+        tm->bus->recs[j][pos/cB] ^= REC_EXEC;
 
     }else{
+        printf("new retrieve\n");
         memcpy(cur, (void*)(tm->contents+pos),cB);
         /*
         for(;pos<end;cur+=4,pos+=4){
@@ -743,9 +779,17 @@ bool_t diff_mem(mem_t oldm, mem_t newm, FILE *outfile)
     bool_t diff = FALSE;
     if (newm->len < len)
     len = newm->len;
+
     // write back
     if(oldm->ca) oldm->ca->clear(TRUE);
     if(newm->ca) newm->ca->clear(TRUE);
+
+    //remove bus
+    /*
+    if(oldm->bus) oldm->bus->remove(oldm);
+    if(newm->bus) newm->bus->remove(newm);
+    */
+
 
     for (pos = 0; (!diff || outfile) && pos+4 <= len; pos += 4) {
         word_t ov = 0;  word_t nv = 0;
@@ -797,6 +841,7 @@ BusController::BusController(int max_share_addr, int blockSize){
     max_addr = bn * blockSize;
     shared_count = 0;
     pthread_mutex_init(&mu,NULL);
+    printf("bus shared max_addr: 0x%.4x\n", max_addr);
 }
 
 BusController::~BusController(){
@@ -807,6 +852,7 @@ BusController::~BusController(){
     }
     delete []locked;
     pthread_mutex_destroy(&mu);
+    printf("destroy bus: %d\n", shared_count);
 
 }
 
@@ -845,8 +891,13 @@ bool_t BusController::getExec(int blockNum, int j){
     int id;
     while(TRUE){
         for(id=shared_count-1;id>=0;--id){
-            if(recs[id][blockNum] & REC_EXEC)
-                break;
+            if(recs[id][blockNum] & REC_EXEC){
+                if(recs[id][blockNum == REC_EXEC] && recs[j][blockNum] == REC_NONE){
+                    continue; // here multi REC_EXEC are allowed
+                }else{
+                    break;
+                }
+            }
         }
         if(id>=0){
             usleep(10);
@@ -854,8 +905,13 @@ bool_t BusController::getExec(int blockNum, int j){
         }
         lockRecs(blockNum);
         for(id=shared_count-1;id>=0;--id){
-            if(recs[id][blockNum] & REC_EXEC)
-                break;
+            if(recs[id][blockNum] & REC_EXEC){
+                if(recs[id][blockNum == REC_EXEC] && recs[j][blockNum] == REC_NONE){
+                    continue; // here multi REC_EXEC are allowed
+                }else{
+                    break;
+                }
+            }
         }
         if(id>=0){ // aother thread get REC_EXEC first
             unlockRecs(blockNum);
@@ -885,31 +941,47 @@ bool_t BusController::add(MemRec *m){
     if(m->ca == NULL){
         return FALSE;
     }
-    mem_map[shared_count] = m;
+    printf("Add to Bus!\n");
     recs[shared_count] = new byte_t[max_addr/cB];
-    m->share(this);
+    pthread_mutex_lock(&mu);
+    mem_map[shared_count] = m;
     shared_count++;
+    pthread_mutex_unlock(&mu);
+    if(shared_count>1){
+        // copy whole memory
+        memcpy(m->contents,mem_map[0]->contents,max_addr);
+        printf("copy shared mem!\n");
+    }
+    printf("successful added to bus!\n");
     return TRUE;
 }
 
 bool_t BusController::remove(MemRec *m){
     int i;
+    pthread_mutex_lock(&mu);
     for(i=0;i<shared_count;++i){
         if(m == mem_map[i]){
             break;
         }
     }
-    if(i>=shared_count) return FALSE;
+    if(i>=shared_count){
+        pthread_mutex_unlock(&mu);
+        return FALSE;
+    }
+    byte_t *tmp = recs[i];
 
-    delete [] (recs[i]);
     int j;
-    for(j=i;j<shared_count;++j){
+    for(j=i;j<shared_count-1;++j){
         mem_map[j] = mem_map[j+1];
         recs[j] = recs[j+1];
     }
     mem_map[shared_count] = NULL;
     recs[shared_count] = NULL;
     shared_count--;
+    pthread_mutex_unlock(&mu);
+    m->bus = NULL;
+    printf("removed from bus!\n");
+    delete [] tmp;
     return TRUE;
 }
 
@@ -918,10 +990,9 @@ bool_t BusController::syncBlock(word_t blockNum, int id){
     if(id<0 || blockNum >= bn)
         return FALSE;
 
-
     int i; word_t pos = blockNum * cB;
     void *start = (void*)(mem_map[id]->contents + pos);
-    // start sync
+    printf("start sync block %d\n", blockNum);
     for(i=0;i<shared_count;++i){
         if(i==id) continue;
         memcpy(mem_map[i]->contents+pos,start,cB);
@@ -931,6 +1002,7 @@ bool_t BusController::syncBlock(word_t blockNum, int id){
 
 bool_t BusController::signal_update(int blockNum, int j){
     getExec(blockNum, j);
+    printf("signal_update!\n");
     int i;
     for(i=0;i<shared_count;++i){
         if(i==j) continue;
@@ -947,6 +1019,7 @@ bool_t BusController::signal_update(int blockNum, int j){
 
 bool_t BusController::signal_allocate(int blockNum, int j){
     getExec(blockNum, j);
+    printf("signal allocate\n");
     int id;
     for(id=shared_count-1;id>=0;--id){
         if(recs[id][blockNum] & REC_WRITE)

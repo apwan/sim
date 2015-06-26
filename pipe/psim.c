@@ -352,7 +352,7 @@ void sim_reset()
 
 /* Update state elements */
 /* May need to disable updating of memory & condition codes */
-static void update_state(bool_t update_mem, bool_t update_cc)
+void update_state(bool_t update_mem, bool_t update_cc)
 {
     /* Writeback(s):
        If either register is REG_NONE, write will have no effect .
@@ -389,11 +389,20 @@ static void update_state(bool_t update_mem, bool_t update_cc)
 		       Need to display both words */
 		    word_t align_addr = mem_addr & ~0x3;
 		    word_t val;
-		    get_word_val(mem, align_addr, &val);
-		    set_memory(align_addr, val);
-		    align_addr+=4;
-		    get_word_val(mem, align_addr, &val);
-		    set_memory(align_addr, val);
+            if(mem->ca){
+                mem->ca->getWord(align_addr, &val);
+                set_memory(align_addr, val);
+                align_addr+=4;
+                mem->ca->getWord(align_addr, &val);
+                set_memory(align_addr, val);
+            }else{
+                mem->getWord(align_addr, &val);
+                set_memory(align_addr, val);
+                align_addr+=4;
+                mem->getWord(align_addr, &val);
+                set_memory(align_addr, val);
+            }
+
 		} else {
 		    set_memory(mem_addr, mem_data);
 		}

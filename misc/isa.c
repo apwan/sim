@@ -500,11 +500,8 @@ stat_t step_state(state_ptr s, FILE *error_file, int gui_id)
         if (reg_valid(lo1))
             cval += get_reg_val(s->r, lo1);
 
-        if (!get_word_val(s->m, cval, &val))
-            return STAT_ADR;
-        word_t tmp = get_reg_val(s->r, hi1);
-        /* write val from reg to mem */
-        if (!set_word_val(s->m, cval, tmp)) {
+        val = get_reg_val(s->r, hi1);
+        if(!s->m->swapCacheWord(cval, &val)){
             if (error_file)
                 fprintf(error_file,
                         "PC = 0x%x, Invalid data address 0x%x\n",

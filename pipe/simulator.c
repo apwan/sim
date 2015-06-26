@@ -4,9 +4,11 @@
 #include <cstring>
 #include "simulator.h"
 #include <pthread.h>
+#include <unistd.h>
 
 Simulator Simulator::sim0, Simulator::sim1;
 Simulator *Simulator::simref[2] = {&Simulator::sim0, &Simulator::sim1};
+BusController *Simulator::bc = NULL;
 int Simulator::showCoreId = 0;
 
 int Simulator::print(const char* format ...){
@@ -26,12 +28,6 @@ void Simulator::tty_sim(){
     state_ptr isa_state = NULL;
 
 
-    /* In TTY mode, the default object file comes from stdin */
-    if (!object_file) {
-         object_file = stdin;
-    }
-    if(!output_file)
-        output_file = stdout;
 
     if (verbosity >= 2){
         if(output_file){
@@ -41,8 +37,8 @@ void Simulator::tty_sim(){
         }
     }
 
-
     init();
+
 
 
     /* Emit simulator name */
@@ -50,8 +46,17 @@ void Simulator::tty_sim(){
         print("%s\n", simname);
 
 
+    /* In TTY mode, the default object file comes from stdin */
+    if (!object_file) {
+         object_file = stdin;
+    }
+    if(!output_file)
+        output_file = stdout;
 
-    log("objectfile: %s\n", this->object_filename);
+
+
+    if(this->object_filename)
+        printf("objectfile: %s\n", this->object_filename);
     byte_cnt = mem->load(object_file, 1);
     CMARK("finish load mem\n")
 
@@ -64,6 +69,12 @@ void Simulator::tty_sim(){
     }
     fclose(object_file);
 
+    if(use_Cache && mem->useCache()){
+        log("tty mode Using Cache\n");
+        if(use_Bus && bc){
+            mem->share(bc);
+        }
+    }
 
     if (do_check) {
         isa_state = new StateRec(mem,reg,cc);
@@ -72,9 +83,6 @@ void Simulator::tty_sim(){
     mem0 = copy_mem(mem);
     reg0 = copy_mem(reg);
 
-    if(use_Cache && mem->useCache()){
-        log("tty mode Using Cache\n");
-    }
 
     icount = run_pipe(instr_limit, 5*instr_limit, &run_status, &result_cc, this);
     if (verbosity > 0) {
@@ -84,16 +92,26 @@ void Simulator::tty_sim(){
         print("Status = %s\n", stat_name((stat_t)run_status));
         print("Condition Codes: %s\n", cc_name(result_cc));
         print("Changed Register State:\n");
+        if(mem->ca){
+            mem->ca->clear(TRUE);
+        }
+        finished = 1;
         diff_reg(reg0, reg, output_file);
         print("Changed Memory State:\n");
-        diff_mem(mem0, mem, output_file);
+        if(use_Bus){
+            printf("waiting for all commit!\n");
+            usleep(1000);
+            diff_mem(mem0, mem, output_file);
+        }else{
+            diff_mem(mem0, mem, output_file);
+        }
+
     }
     if (do_check) {
         byte_t e = STAT_AOK;
         int step;
         bool_t match = TRUE;
 
-        printf("start stepping\n");
         for (step = 0; step < instr_limit && e == STAT_AOK; step++) {
             e = step_state(isa_state, stdout);
         }
@@ -169,6 +187,7 @@ void Simulator::config(sim_config &conf){
     do_check = conf.do_check;
     gui_mode = conf.use_Gui;
     use_Cache = conf.use_Cache;
+    use_Bus = conf.use_Bus;
     object_filename = conf.input_filename;
     if(object_filename){
         object_file = fopen(object_filename,"r");
@@ -230,7 +249,13 @@ void Simulator::init(){
     mem_wb_next = (mem_wb_ptr)mem_wb_state->next;
     mem_wb_curr = (mem_wb_ptr)mem_wb_state->current;
 
+    printf("init\n");
+
     reset();
+
+
+
+    printf("about to clear mem\n");
     mem->clear();
 
 }
@@ -238,7 +263,9 @@ void Simulator::init(){
 void Simulator::reset(){
     if (!initialized)
         init();
+
     pip.clear();
+
     reg->clear();
     minAddr = 0;
     memCnt = 0;
@@ -268,6 +295,7 @@ void Simulator::reset(){
     if(gui_mode){
         report(0); //GUI
     }
+
 
 }
 
@@ -345,6 +373,7 @@ byte_t Simulator::step_pipe(int max_instr, int ccount){
     int ahead_ex = ahead_mem + (mem_status != STAT_BUB);
     bool_t update_mem = ahead_mem < max_instr;
     bool_t update_cc = ahead_ex < max_instr;
+
 
     /* Update program-visible state */
     update_state(update_mem, update_cc);
@@ -434,12 +463,13 @@ void Simulator::update_state(bool_t update_mem, bool_t update_cc)
         log("\tDisabled write of 0x%x to address 0x%x\n", mem_data, mem_addr);
     }
 
+
     if (update_mem && mem_write) {
-        if (!set_word_val(mem, mem_addr, mem_data)) {
+
+        if (!mem->setCacheWord(mem_addr, mem_data)) {
             log("\tCouldn't write to address 0x%x\n", mem_addr);
         } else {
             log("\tWrote 0x%x to address 0x%x\n", mem_data, mem_addr);
-
 
 
             if (gui_mode) {
@@ -448,15 +478,23 @@ void Simulator::update_state(bool_t update_mem, bool_t update_cc)
         if (mem_addr % 4 != 0) {
             /* Just did a misaligned write.
                Need to display both words */
+            printf("misaligned\n");
             word_t align_addr = mem_addr & ~0x3;
             word_t val;
-            get_word_val(mem, align_addr, &val);
+            if(mem->ca){
+                mem->ca->getWord(align_addr, &val);
+                set_memory(align_addr, val, this);
+                align_addr+=4;
+                mem->ca->getWord(align_addr, &val);
+                set_memory(align_addr, val, this);
+            }else{
+                mem->getWord(align_addr, &val);
+                set_memory(align_addr, val, this);
+                align_addr+=4;
+                mem->getWord(align_addr, &val);
+                set_memory(align_addr, val, this);
 
-            set_memory(align_addr, val, this);
-            align_addr+=4;
-            get_word_val(mem, align_addr, &val);
-
-            set_memory(align_addr, val, this);
+            }
         } else {
             set_memory(mem_addr, mem_data, this);
         }
